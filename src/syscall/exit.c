@@ -517,6 +517,10 @@ void translate_syscall_exit(Tracee *tracee)
 #endif
 
 	case PR_execve:
+		/* On success the result register becomes the loader's,
+		 * so tell a failed execveat(2) apart now.  */
+		if ((int) syscall_result >= 0)
+			tracee->from_execveat = false;
 		translate_execve_exit(tracee);
 		goto end;
 
@@ -828,4 +832,10 @@ end:
 	status = notify_extensions(tracee, SYSCALL_EXIT_END, 0, 0);
 	if (status < 0)
 		poke_reg(tracee, SYSARG_RESULT, (word_t) status);
+
+	/* A failed execveat(2) leaves its own registers as they were.  */
+	if (tracee->from_execveat) {
+		tracee->_regs[ORIGINAL] = tracee->execveat_regs;
+		tracee->from_execveat = false;
+	}
 }

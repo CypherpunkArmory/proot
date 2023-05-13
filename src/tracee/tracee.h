@@ -218,6 +218,11 @@ typedef struct tracee {
 	bool restore_original_regs;
 	bool restore_original_regs_after_seccomp_event;
 
+	/* The registers of an execveat(2) PRoot turned into the execve(2)
+	 * it amounts to, put back if that execve(2) fails.  */
+	struct user_regs_struct execveat_regs;
+	bool from_execveat;
+
 	/* State for the special handling of SIGSTOP.  */
 	enum {
 		SIGSTOP_IGNORED = 0,  /* Ignore SIGSTOP (once the parent is known).  */

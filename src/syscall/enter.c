@@ -1956,6 +1956,22 @@ int translate_syscall_enter(Tracee *tracee)
 	word_t syscall_number;
 	bool special = false;
 
+	/* execveat(AT_FDCWD, path, argv, envp, flags) is execve(path, argv,
+	 * envp): make it one before anything looks at it, so the
+	 * extensions and the exit stage handle it as the execve(2) it is.
+	 * Its own registers are put back if it fails.  */
+	tracee->from_execveat = false;
+	if (get_sysnum(tracee, ORIGINAL) == PR_execveat
+	    && (int) peek_reg(tracee, ORIGINAL, SYSARG_1) == AT_FDCWD) {
+		tracee->execveat_regs = tracee->_regs[ORIGINAL];
+		tracee->from_execveat = true;
+		set_sysnum(tracee, PR_execve);
+		poke_reg(tracee, SYSARG_1, peek_reg(tracee, ORIGINAL, SYSARG_2));
+		poke_reg(tracee, SYSARG_2, peek_reg(tracee, ORIGINAL, SYSARG_3));
+		poke_reg(tracee, SYSARG_3, peek_reg(tracee, ORIGINAL, SYSARG_4));
+		save_current_regs(tracee, ORIGINAL);
+	}
+
 	status = notify_extensions(tracee, SYSCALL_ENTER_START, 0, 0);
 	if (status < 0)
 		goto end;
@@ -1972,6 +1988,12 @@ int translate_syscall_enter(Tracee *tracee)
 
 	case PR_execve:
 		status = translate_execve_enter(tracee);
+		break;
+
+	case PR_execveat:
+		/* Only an execveat(2) relative to a descriptor is left.  */
+		note(tracee, ERROR, SYSTEM, "execveat() with non-AT_FDCWD fd is not currently supported");
+		status = -ENOSYS;
 		break;
 
 	case PR_ptrace:
