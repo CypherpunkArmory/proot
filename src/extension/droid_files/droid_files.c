@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "cli/note.h"
+#include "path/path.h"
 #include "tracee/mem.h"
 #include "extension/extension.h"
 #include "extension/fake_id0/helper_functions.h"
@@ -33,8 +34,8 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
         return size;
     if (size >= PATH_MAX)
         return -ENAMETOOLONG;
-    if(strlen(path) > 0)
-        if(belongs_to_guestfs(tracee, path)) //easy early abort if the path is part of the guestfs
+    if(strlen(orig_path) > 0)
+        if(belongs_to_guestfs(tracee, orig_path)) //easy early abort if the path is part of the guestfs
             return 1;
 
     VERBOSE(tracee, 1, "droid_files path: %s", orig_path);
@@ -67,10 +68,10 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
     /* int open(const char *pathname, int flags, mode_t mode) */
     /* int creat(const char *pathname, mode_t mode) */
     case PR_openat:
-        return handle_open_enter_end(tracee, SYSARG_2);
+        return handle_open_sysenter_end(tracee, SYSARG_2);
     case PR_open:
     case PR_creat:
-        return handle_open_enter_end(tracee, SYSARG_1);
+        return handle_open_sysenter_end(tracee, SYSARG_1);
 
     default:
         return 0;
