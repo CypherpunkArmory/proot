@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <string.h>
 
+#include "cli/note.h"
 #include "tracee/mem.h"
 #include "extension/extension.h"
 #include "extension/fake_id0/helper_functions.h"
@@ -52,7 +53,8 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
     }
 
     case SYSCALL_ENTER_END: {
-        return handle_sysenter_end(TRACEE(extension));
+        Config *config = talloc_get_type_abort(extension->config, Config);
+        return handle_sysenter_end(TRACEE(extension), config);
     }
 
     default:
