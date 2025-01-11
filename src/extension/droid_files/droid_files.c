@@ -12,6 +12,51 @@
 #include "extension/extension.h"
 #include "extension/fake_id0/helper_functions.h"
 
+typedef struct {
+    word_t sysCall;
+    char path[4096];
+    word_t sysargs[5];
+} sock_req_t;
+
+typedef struct {
+    struct cmsghdr align;
+    int fd[1];
+} ancillary_data_buffer;
+
+int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
+    int status, size;
+    char check_path[] = "/sdcard/";
+    char orig_path[PATH_MAX];
+    
+    size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
+    if (size < 0) //return errors
+        return size;
+    if (size >= PATH_MAX)
+        return -ENAMETOOLONG;
+    if(strlen(path) > 0)
+        if(belongs_to_guestfs(tracee, path)) //easy early abort if the path is part of the guestfs
+            return 1;
+
+    VERBOSE(tracee, 1, "droid_files path: %s", orig_path);
+
+    if (strncmp(orig_path, check_path, strlen(check_path)) != 0)
+        return 0;
+
+    set_sysnum(tracee, PR_socket);
+    poke_reg(tracee, SYSARG_1, AF_UNIX);
+    poke_reg(tracee, SYSARG_2, SOCK_STREAM);
+    poke_reg(tracee, SYSARG_3, 0);
+
+    //Allocate memory we are going to need later
+    //tracee->word_store[0] = alloc_mem(tracee, sizeof(struct sockaddr_un));
+    //tracee->word_store[1] = alloc_mem(tracee, sizeof(int));
+    //tracee->word_store[2] = alloc_mem(tracee, sizeof(struct sock_req_t));
+    //tracee->word_store[3] = alloc_mem(tracee, sizeof(ancillary_data_buffer));
+    //tracee->word_store[4] = alloc_mem(tracee, sizeof(struct msghdr));
+
+    return 0;
+}
+
 static int handle_sysenter_end(Tracee *tracee, Config *config)
 {
     word_t sysnum;
@@ -124,48 +169,6 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
 }
  */
 
-
-typedef struct {
-    word_t sysCall;
-    char path[4096];
-    word_t sysargs[5];
-} sock_req_t;
-
-typedef struct {
-    struct cmsghdr align;
-    int fd[1];
-} ancillary_data_buffer;
-
-int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
-    int status;
-    char check_path[] = "/sdcard/";
-    char orig_path[PATH_MAX];
-    
-    status = read_sysarg_path(tracee, orig_path, path_sysarg, ORIGINAL);
-    if (status < 0) //return errors
-        return status;
-    if (status == 0) //skip any path that is part of the guestfs
-        return 0;
-
-    VERBOSE(tracee, 1, "droid_files path: %s", orig_path);
-
-    if (strncmp(orig_path, check_path, strlen(check_path)) != 0)
-        return 0;
-
-    set_sysnum(tracee, PR_socket);
-    poke_reg(tracee, SYSARG_1, AF_UNIX);
-    poke_reg(tracee, SYSARG_2, SOCK_STREAM);
-    poke_reg(tracee, SYSARG_3, 0);
-
-    //Allocate memory we are going to need later
-    //tracee->word_store[0] = alloc_mem(tracee, sizeof(struct sockaddr_un));
-    //tracee->word_store[1] = alloc_mem(tracee, sizeof(int));
-    //tracee->word_store[2] = alloc_mem(tracee, sizeof(struct sock_req_t));
-    //tracee->word_store[3] = alloc_mem(tracee, sizeof(ancillary_data_buffer));
-    //tracee->word_store[4] = alloc_mem(tracee, sizeof(struct msghdr));
-
-    return 0;
-}
 
 /* Attach shared memory segment. */
 /*
