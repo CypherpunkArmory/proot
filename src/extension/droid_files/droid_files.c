@@ -58,7 +58,7 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
     return 0;
 }
 
-static int handle_sysenter_end(Tracee *tracee, Config *config)
+static int handle_sysenter_end(Tracee *tracee)
 {
     word_t sysnum;
 
@@ -99,8 +99,7 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
     }
 
     case SYSCALL_ENTER_END: {
-        Config *config = talloc_get_type_abort(extension->config, Config);
-        return handle_sysenter_end(TRACEE(extension), config);
+        return handle_sysenter_end(TRACEE(extension));
     }
 
     default:
