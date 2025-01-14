@@ -123,6 +123,9 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
             int fd[1];
         } ancillary_data_buffer;
         ancillary_data_buffer.fd[0] = -1;
+        ancillary_data_buffer.align.cmsg_len = sizeof(struct cmsghdr) + sizeof(int);
+        ancillary_data_buffer.align.cmsg_level = SOL_SOCKET;
+        ancillary_data_buffer.align.cmsg_type = SCM_RIGHTS;
         VERBOSE(tracee, 4, "%s: Write to word_store[6]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[6], &ancillary_data_buffer, sizeof(ancillary_data_buffer));
         VERBOSE(tracee, 4, "%s: Wrote to word_store[6]", __PRETTY_FUNCTION__);
@@ -136,10 +139,12 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
             .msg_control = (void *)tracee->word_store[6],
             .msg_controllen = sizeof(struct cmsghdr) + sizeof(int)
         };
+	/*
         struct cmsghdr* cmsg = CMSG_FIRSTHDR(&message_header);
         cmsg->cmsg_len = message_header.msg_controllen; // sizeof(int);
         cmsg->cmsg_level = SOL_SOCKET;
         cmsg->cmsg_type = SCM_RIGHTS;
+	*/
         VERBOSE(tracee, 4, "%s: Write to word_store[7]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[7], &message_header, sizeof(struct msghdr));
         VERBOSE(tracee, 4, "%s: Wrote to word_store[7]", __PRETTY_FUNCTION__);
