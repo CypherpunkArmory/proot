@@ -111,15 +111,21 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         }
 
         char nothing = '!';
+        VERBOSE(tracee, 4, "%s: Write to word_store[4]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[4], &nothing, 1);
+        VERBOSE(tracee, 4, "%s: Wrote to word_store[4]", __PRETTY_FUNCTION__);
         struct iovec nothing_ptr = { .iov_base = (void *)tracee->word_store[4], .iov_len = 1 };
+        VERBOSE(tracee, 4, "%s: Write to word_store[5]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[5], &nothing_ptr, sizeof(nothing_ptr));
+        VERBOSE(tracee, 4, "%s: Wrote to word_store[5]", __PRETTY_FUNCTION__);
         struct {
             struct cmsghdr align;
             int fd[1];
         } ancillary_data_buffer;
         ancillary_data_buffer.fd[0] = -1;
+        VERBOSE(tracee, 4, "%s: Write to word_store[6]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[6], &ancillary_data_buffer, sizeof(ancillary_data_buffer));
+        VERBOSE(tracee, 4, "%s: Wrote to word_store[6]", __PRETTY_FUNCTION__);
 
         struct msghdr message_header = {
             .msg_name = NULL,
@@ -134,7 +140,9 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         cmsg->cmsg_len = message_header.msg_controllen; // sizeof(int);
         cmsg->cmsg_level = SOL_SOCKET;
         cmsg->cmsg_type = SCM_RIGHTS;
+        VERBOSE(tracee, 4, "%s: Write to word_store[7]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[7], &message_header, sizeof(struct msghdr));
+        VERBOSE(tracee, 4, "%s: Wrote to word_store[7]", __PRETTY_FUNCTION__);
 
         register_chained_syscall(tracee, PR_recvmsg, tracee->word_store[1], tracee->word_store[7], 0, 0, 0, 0);
         return 0;
