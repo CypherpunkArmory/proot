@@ -13,16 +13,13 @@
 #include "extension/extension.h"
 #include "extension/fake_id0/helper_functions.h"
 
+#define DROID_FILES_SOCKNAME "/support/common/droid_files_socket"
+
 typedef struct {
     word_t sysCall;
     char path[4096];
     word_t sysargs[5];
 } sock_req_t;
-
-typedef struct {
-    struct cmsghdr align;
-    int fd[1];
-} ancillary_data_buffer;
 
 int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
     int status, size;
@@ -49,14 +46,126 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
     poke_reg(tracee, SYSARG_3, 0);
 
     //Allocate memory we are going to need later
-    //tracee->word_store[0] = alloc_mem(tracee, sizeof(struct sockaddr_un));
-    //tracee->word_store[1] = alloc_mem(tracee, sizeof(int));
-    //tracee->word_store[2] = alloc_mem(tracee, sizeof(struct sock_req_t));
-    //tracee->word_store[3] = alloc_mem(tracee, sizeof(ancillary_data_buffer));
-    //tracee->word_store[4] = alloc_mem(tracee, sizeof(struct msghdr));
+    tracee->word_store[0] = alloc_mem(tracee, sizeof(struct sockaddr_un));
+    tracee->word_store[1] = alloc_mem(tracee, sizeof(struct word_t)); //socket file handle
+    tracee->word_store[2] = alloc_mem(tracee, sizeof(struct word_t)); //final file handle
+    tracee->word_store[3] = alloc_mem(tracee, sizeof(struct sock_req_t));
+    tracee->word_store[4] = alloc_mem(tracee, 1);
+    tracee->word_store[5] = alloc_mem(tracee, sizeof(struct iovec));
+    struct {
+        struct cmsghdr align;
+        int fd[1];
+    } ancillary_data_buffer;
+    tracee->word_store[6] = alloc_mem(tracee, sizeof(ancillary_data_buffer));
+    tracee->word_store[7] = alloc_mem(tracee, sizeof(struct msghdr));
 
     return 0;
 }
+
+int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
+{
+    word_t sysnum;
+    word_t result;
+    int shmid;
+
+    sysnum = get_sysnum(tracee, CURRENT);
+    switch (sysnum) {
+    case PR_socket:
+        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+        if ((int)result < 0) {
+            VERBOSE(tracee, 4, "%s: cannot create UNIX socket", __PRETTY_FUNCTION__);
+            return -EINVAL;
+        }
+        struct sockaddr_un sockaddr;
+        memset(&sockaddr, 0, sizeof(sockaddr));
+        sockaddr.sun_family = AF_UNIX;
+        sprintf(&sockaddr.sun_path, DROID_FILES_SOCKNAME);
+        write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
+        tracee->word_store[1] = result;
+        tracee->word_store[2] = (word_t)-1;
+        register_chained_syscall(tracee, PR_connect, result, tracee->word_store[0], sizeof(sockaddr), 0, 0, 0);
+        return 0;
+    case PR_connect:
+        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+        if ((int)result != 0) {
+            VERBOSE(tracee, 4, "%s: Cannot connect to UNIX socket", __PRETTY_FUNCTION__);
+            return -EINVAL;
+        }
+        sock_req_t sock_req;
+        sock_req.sysCall = 1;
+        char orig_path[PATH_MAX];
+        size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
+        strcpy(sock_req.path, orig_path);
+        write_data(tracee, tracee->word_store[3], &sock_req, sizeof(struct sock_req_t));
+        register_chained_syscall(tracee, PR_write, tracee->word_store[1], tracee->word_store[3], sizeof(sock_req), 0, 0, 0);
+    case PR_write:
+        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+        if ((size_t)result != sizeof(sock_req_t)) {
+            VERBOSE(tracee, 4, "%s: Failed to write UNIX socket", __PRETTY_FUNCTION__);
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
+
+        char nothing = '!';
+        write_data(tracee, tracee->word_store[4], &nothing, 1);
+        struct iovec nothing_ptr = { .iov_base = (void *)tracee->word_store[4], .iov_len = 1 };
+        write_data(tracee, tracee->word_store[5], &nothing_ptr, sizeof(nothing_ptr));
+        struct {
+            struct cmsghdr align;
+            int fd[1];
+        } ancillary_data_buffer;
+        ancillary_data_buffer.fd[0] = -1;
+        write_data(tracee, tracee->word_store[6], &ancillary_data_buffer, sizeof(ancillary_data_buffer));
+
+        struct msghdr message_header = {
+            .msg_name = NULL,
+            .msg_namelen = 0,
+            .msg_iov = (struct iovec *)tracee->word_store[5],
+            .msg_iovlen = 1,
+            .msg_flags = 0,
+            .msg_control = (void *)tracee->word_store[6],
+            .msg_controllen = sizeof(struct cmsghdr) + sizeof(int)
+        };
+        struct cmsghdr* cmsg = CMSG_FIRSTHDR(&message_header);
+        cmsg->cmsg_len = message_header.msg_controllen; // sizeof(int);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        write_data(tracee, tracee->word_store[7], &message_header, sizeof(struct msghdr));
+
+        register_chained_syscall(tracee, PR_recvmsg, tracee->word_store[1], tracee->word_store[7], 0, 0, 0, 0);
+        return 0;
+    case PR_recvmsg:
+        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+        if ((int)result < 0) {
+            VERBOSE(tracee, 4, "%s: recvmesg() failed on socket", __PRETTY_FUNCTION__);
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
+
+        struct msghdr message_header_2;
+        read_data(tracee, &message_header_2, tracee->word_store[7], sizeof(struct msghdr));
+
+        struct {
+            struct cmsghdr align;
+            int fd[1];
+        } ancillary_data_buffer_2;
+        read_data(tracee, &ancillary_data_buffer_2, (word_t)message_header_2.msg_control, sizeof(ancillary_data_buffer_2));
+
+        tracee->word_store[2] = ancillary_data_buffer_2.fd[0];
+        register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+        return 0;
+    case PR_close: {
+        poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
+        if ((int)tracee->word_store[2] == -1)
+            return -EINVAL;
+    }
+    default:
+        return 0;
+    }
+
+    return 0;
+}
+
 
 static int handle_sysenter_end(Tracee *tracee)
 {
@@ -72,6 +181,26 @@ static int handle_sysenter_end(Tracee *tracee)
     case PR_open:
     case PR_creat:
         return handle_open_sysenter_end(tracee, SYSARG_1);
+
+    default:
+        return 0;
+    }
+}
+
+static int handle_sysexit_end(Tracee *tracee)
+{
+    word_t sysnum;
+
+    sysnum = get_sysnum(tracee, ORIGINAL);
+    switch (sysnum) {
+    /* int openat(int dirfd, const char *pathname, int flags, mode_t mode) */
+    /* int open(const char *pathname, int flags, mode_t mode) */
+    /* int creat(const char *pathname, mode_t mode) */
+    case PR_openat:
+        return handle_open_sysexit_end(tracee, SYSARG_2);
+    case PR_open:
+    case PR_creat:
+        return handle_open_sysexit_end(tracee, SYSARG_1);
 
     default:
         return 0;
@@ -102,213 +231,14 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
         return handle_sysenter_end(TRACEE(extension));
     }
 
+    case SYSCALL_EXIT_END: {
+        return handle_sysexit_end(TRACEE(extension));
+    }
+
     default:
         return 0;
     }
 }
 
 
-/*
- JNIEXPORT jint JNICALL Java_tech_ula_library_ServerService_droidFileClientRun( JNIEnv *env, __attribute__((__unused__)) jobject thiz, jstring jSockPath, jstring jFilePath) {
-    int server_fd, fd_got;
-    struct sockaddr_un server_addr;
-    __attribute__((__unused__)) char buf[1024];
-    sock_req_t sock_req;
 
-    const char *sockPath = (*env)->GetStringUTFChars(env, jSockPath, 0);
-    __attribute__((__unused__)) const char *filePath = (*env)->GetStringUTFChars(env, jFilePath, 0);
-
-    // Create a socket
-    server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-        __android_log_print(ANDROID_LOG_ERROR,  "droid_files", "Client: socket");
-        return(-1);
-    }
-    __android_log_print(ANDROID_LOG_DEBUG,  "droid_files", "Client: socket");
-
-    //Connect to the socket
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sun_family = AF_UNIX;
-    strncpy(server_addr.sun_path, sockPath, sizeof(server_addr.sun_path) - 1);
-    if (connect(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-        __android_log_print(ANDROID_LOG_ERROR,  "droid_files", "Client: connect");
-        return(-1);
-    }
-    __android_log_print(ANDROID_LOG_DEBUG,  "droid_files", "Client: connect");
-
-    sock_req.sysCall = 1;
-    strcpy(sock_req.path, filePath);
-    if (write(server_fd, &sock_req, sizeof(sock_req_t)) != sizeof(sock_req_t)) {
-        __android_log_print(ANDROID_LOG_ERROR,  "droid_files", "Client: write");
-    }
-    __android_log_print(ANDROID_LOG_DEBUG,  "droid_files", "Client: write");
-
-    // Get the file descriptor
-    if (ancil_get_fd(server_fd, &fd_got) != 0) {
-        __android_log_print(ANDROID_LOG_ERROR,  "droid_files", "Client: recvmsg");
-        return(-1);
-    }
-    __android_log_print(ANDROID_LOG_DEBUG,  "droid_files", "Client: recvmsg %d", fd_got);
-
-    // Print file contents
-    //if (read(fd_got, buf, 1024) == -1) {
-        //__android_log_print(ANDROID_LOG_ERROR,  "droid_files", "Client: read");
-        //return(-1);
-    //}
-    //__android_log_print(ANDROID_LOG_DEBUG,  "droid_files", "Content of this file are: %s", buf);
-
-    // Close the file descriptor
-    close(fd_got);
-    __android_log_print(ANDROID_LOG_DEBUG,  "droid_files", "Client close %d", fd_got);
-
-    // Close the sockets
-    close(server_fd);
-    __android_log_print(ANDROID_LOG_DEBUG,  "droid_files", "Client close socket");
-
-    return 0;
-}
- */
-
-
-/* Attach shared memory segment. */
-/*
-int handle_open_sysexit_end(Tracee *tracee)
-{
-    word_t sysnum;
-    word_t result;
-    int shmid;
-
-    sysnum = get_sysnum(tracee, CURRENT);
-    switch (sysnum) {
-    case PR_socket:
-        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
-        if ((int)result < 0) {
-            VERBOSE(tracee, 4, "%s: cannot create UNIX socket", __PRETTY_FUNCTION__);
-            return -EINVAL;
-        }
-        struct sockaddr_un sockaddr;
-        memset(&sockaddr, 0, sizeof(sockaddr));
-        sockaddr.sun_family = AF_UNIX;
-        sprintf(&sockaddr.sun_path[1], ANDROID_SHMEM_SOCKNAME, ashv_local_socket_id);
-        int addrlen = sizeof(sockaddr.sun_family) + strlen(&sockaddr.sun_path[1]) + 1;
-        write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
-        tracee->word_store[8] = result;
-        tracee->word_store[9] = (word_t)-1;
-        register_chained_syscall(tracee, PR_connect, result, tracee->word_store[0], addrlen, 0, 0, 0);
-        return 0;
-    case PR_connect:
-        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
-        if ((int)result != 0) {
-            VERBOSE(tracee, 4, "%s: Cannot connect to UNIX socket", __PRETTY_FUNCTION__);
-            return -EINVAL;
-        }
-        shmid = (int)peek_reg(tracee, stage, SYSARG_1);
-        write_data(tracee, tracee->word_store[1], &shmid, sizeof(int));
-        register_chained_syscall(tracee, PR_sendto, tracee->word_store[8], tracee->word_store[1], sizeof(int), 0, 0, 0);
-        return 0;
-    case PR_sendto:
-        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
-        if ((int)result != sizeof(shmid)) {
-            VERBOSE(tracee, 4, "%s: send() failed on socket", __PRETTY_FUNCTION__);
-            register_chained_syscall(tracee, PR_close, tracee->word_store[8], 0, 0, 0, 0, 0);
-            return 0;
-        }
-        register_chained_syscall(tracee, PR_read, tracee->word_store[8], tracee->word_store[2], sizeof(key_t), 0, 0, 0);
-        return 0;
-    case PR_read:
-        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
-        if ((int)result != sizeof(key_t)) {
-            VERBOSE(tracee, 4, "%s: read() failed on socket", __PRETTY_FUNCTION__);
-            register_chained_syscall(tracee, PR_close, tracee->word_store[8], 0, 0, 0, 0, 0);
-            return 0;
-        }
-
-        char nothing = '!';
-        write_data(tracee, tracee->word_store[3], &nothing, 1);
-        struct iovec nothing_ptr = { .iov_base = (void *)tracee->word_store[3], .iov_len = 1 };
-        write_data(tracee, tracee->word_store[4], &nothing_ptr, sizeof(nothing_ptr));
-
-        struct {
-            struct cmsghdr align;
-            int fd[1];
-        } ancillary_data_buffer;
-        ancillary_data_buffer.fd[0] = -1;
-        write_data(tracee, tracee->word_store[5], &ancillary_data_buffer, sizeof(ancillary_data_buffer));
-
-        struct msghdr message_header = {
-            .msg_name = NULL,
-            .msg_namelen = 0,
-            .msg_iov = (struct iovec *)tracee->word_store[4],
-            .msg_iovlen = 1,
-            .msg_flags = 0,
-            .msg_control = (void *)tracee->word_store[5],
-            .msg_controllen = sizeof(struct cmsghdr) + sizeof(int)
-        };
-        write_data(tracee, tracee->word_store[6], &message_header, sizeof(struct msghdr));
-
-        register_chained_syscall(tracee, PR_recvmsg, tracee->word_store[8], tracee->word_store[6], 0, 0, 0, 0);
-        return 0;
-    case PR_recvmsg:
-        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
-        if ((int)result < 0) {
-            VERBOSE(tracee, 4, "%s: recvmesg() failed on socket", __PRETTY_FUNCTION__);
-            register_chained_syscall(tracee, PR_close, tracee->word_store[8], 0, 0, 0, 0, 0);
-            return 0;
-        }
-
-        struct msghdr message_header_2;
-        read_data(tracee, &message_header_2, tracee->word_store[6], sizeof(struct msghdr));
-
-        struct {
-            struct cmsghdr align;
-            int fd[1];
-        } ancillary_data_buffer_2;
-        read_data(tracee, &ancillary_data_buffer_2, (word_t)message_header_2.msg_control, sizeof(ancillary_data_buffer_2));
-
-        tracee->word_store[9] = ancillary_data_buffer_2.fd[0];
-        register_chained_syscall(tracee, PR_close, tracee->word_store[8], 0, 0, 0, 0, 0);
-        return 0;
-    case PR_close: {
-        if ((int)tracee->word_store[9] == -1)
-            return -EINVAL;
-
-        int shmid = (int)peek_reg(tracee, stage, SYSARG_1);
-        void *shmaddr = (void *)peek_reg(tracee, stage, SYSARG_2);
-        int shmflg = (int)peek_reg(tracee, stage, SYSARG_3);
-        int idx = ashv_find_index(shmid);
-        if (idx == -1) {
-            VERBOSE(tracee, 4, "%s: shmid %x does not exist", __PRETTY_FUNCTION__, shmid);
-            return -EINVAL;
-        }
-
-        word_t mmap_sysnum = detranslate_sysnum(get_abi(tracee), PR_mmap2) != SYSCALL_AVOIDER
-                        ? PR_mmap2
-                        : PR_mmap;
-        register_chained_syscall(tracee, mmap_sysnum, (word_t)shmaddr, (word_t)shmem[idx].size, (word_t)(PROT_READ | (shmflg == 0 ? PROT_WRITE : 0)), (word_t)MAP_SHARED, tracee->word_store[9], 0);
-        return 0;
-    }
-    case PR_mmap:
-    case PR_mmap2: {
-        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
-        if ((void *)result == MAP_FAILED) {
-            VERBOSE(tracee, 4, "%s: mmap() failed", __PRETTY_FUNCTION__);
-            return -EINVAL;
-        }
-
-        int shmid = (int)peek_reg(tracee, stage, SYSARG_1);
-        int idx = ashv_find_index(shmid);
-        if (idx == -1) {
-            VERBOSE(tracee, 4, "%s: shmid %x does not exist", __PRETTY_FUNCTION__, shmid);
-            return -EINVAL;
-        }
-        android_shmem_addr_attach(idx, (void *)result);
-        VERBOSE(tracee, 4, "%s: shmid %x, nattach %d", __PRETTY_FUNCTION__, shmid, shmem[idx].nattach);
-        return 0;
-    }
-    default:
-        return 0;
-    }
-
-    return 0;
-}
-*/
