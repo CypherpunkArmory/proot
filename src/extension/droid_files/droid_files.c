@@ -80,7 +80,10 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         struct sockaddr_un sockaddr;
         memset(&sockaddr, 0, sizeof(sockaddr));
         sockaddr.sun_family = AF_UNIX;
-        sprintf(sockaddr.sun_path, DROID_FILES_SOCKNAME);
+        char sock_path[PATH_MAX];
+	translate_path(tracee, sock_path, AT_FDCWD, DROID_FILES_SOCKNAME, true);
+        sprintf(sockaddr.sun_path, sock_path);
+        VERBOSE(tracee, 1, "droid_files path: %s", sock_path);
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
         tracee->word_store[2] = (word_t)-1;
@@ -232,6 +235,7 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
         return handle_sysenter_end(TRACEE(extension));
     }
 
+    case SYSCALL_CHAINED_EXIT:
     case SYSCALL_EXIT_END: {
         return handle_sysexit_end(TRACEE(extension));
     }
