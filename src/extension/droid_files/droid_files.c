@@ -219,9 +219,9 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
     case INITIALIZATION: {
         /* List of syscalls handled by this extension */
         static FilteredSysnum filtered_sysnums[] = {
-            { PR_open,   0 },
-            { PR_openat, 0 },
-            { PR_creat,  0 },
+            { PR_open,   FILTER_SYSEXIT },
+            { PR_openat, FILTER_SYSEXIT },
+            { PR_creat,  FILTER_SYSEXIT },
             FILTERED_SYSNUM_END,
         };
         extension->filtered_sysnums = filtered_sysnums;
