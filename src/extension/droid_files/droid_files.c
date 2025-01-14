@@ -10,6 +10,7 @@
 #include "cli/note.h"
 #include "path/path.h"
 #include "tracee/mem.h"
+#include "syscall/chain.h"
 #include "extension/extension.h"
 #include "extension/fake_id0/helper_functions.h"
 
@@ -47,9 +48,9 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
 
     //Allocate memory we are going to need later
     tracee->word_store[0] = alloc_mem(tracee, sizeof(struct sockaddr_un));
-    tracee->word_store[1] = alloc_mem(tracee, sizeof(struct word_t)); //socket file handle
-    tracee->word_store[2] = alloc_mem(tracee, sizeof(struct word_t)); //final file handle
-    tracee->word_store[3] = alloc_mem(tracee, sizeof(struct sock_req_t));
+    tracee->word_store[1] = alloc_mem(tracee, sizeof(word_t)); //socket file handle
+    tracee->word_store[2] = alloc_mem(tracee, sizeof(word_t)); //final file handle
+    tracee->word_store[3] = alloc_mem(tracee, sizeof(sock_req_t));
     tracee->word_store[4] = alloc_mem(tracee, 1);
     tracee->word_store[5] = alloc_mem(tracee, sizeof(struct iovec));
     struct {
@@ -63,9 +64,9 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
 }
 
 int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
-{
     word_t sysnum;
     word_t result;
+    size_t size;
     int shmid;
 
     sysnum = get_sysnum(tracee, CURRENT);
@@ -79,7 +80,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         struct sockaddr_un sockaddr;
         memset(&sockaddr, 0, sizeof(sockaddr));
         sockaddr.sun_family = AF_UNIX;
-        sprintf(&sockaddr.sun_path, DROID_FILES_SOCKNAME);
+        sprintf(sockaddr.sun_path, DROID_FILES_SOCKNAME);
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
         tracee->word_store[2] = (word_t)-1;
