@@ -97,7 +97,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         char orig_path[PATH_MAX];
         size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
         strcpy(sock_req.path, orig_path);
-        write_data(tracee, tracee->word_store[3], &sock_req, sizeof(struct sock_req_t));
+        write_data(tracee, tracee->word_store[3], &sock_req, sizeof(sock_req_t));
         register_chained_syscall(tracee, PR_write, tracee->word_store[1], tracee->word_store[3], sizeof(sock_req), 0, 0, 0);
     case PR_write:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
