@@ -23,7 +23,7 @@ typedef struct {
 } sock_req_t;
 
 int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
-    int status, size;
+    int size;
     char check_path[] = "/sdcard/";
     char orig_path[PATH_MAX];
     
@@ -67,7 +67,6 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
     word_t sysnum;
     word_t result;
     size_t size;
-    int shmid;
 
     sysnum = get_sysnum(tracee, CURRENT);
     switch (sysnum) {
@@ -82,7 +81,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         sockaddr.sun_family = AF_UNIX;
         char sock_path[PATH_MAX];
 	translate_path(tracee, sock_path, AT_FDCWD, DROID_FILES_SOCKNAME, true);
-        sprintf(sockaddr.sun_path, sock_path);
+        sprintf(sockaddr.sun_path, "%s", sock_path);
         VERBOSE(tracee, 1, "droid_files path: %s", sock_path);
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
@@ -102,6 +101,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         strcpy(sock_req.path, orig_path);
         write_data(tracee, tracee->word_store[3], &sock_req, sizeof(sock_req_t));
         register_chained_syscall(tracee, PR_write, tracee->word_store[1], tracee->word_store[3], sizeof(sock_req), 0, 0, 0);
+        return 0;
     case PR_write:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
         if ((size_t)result != sizeof(sock_req_t)) {
