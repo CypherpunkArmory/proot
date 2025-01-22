@@ -103,7 +103,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         if (orig_sysnum != PR_creat) {
 	    sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
         } else {
-            sock_reg.sysargs[0] = 0;
+            sock_req.sysargs[0] = 0;
         }
 	sock_req.sysargs[1] = peek_reg(tracee, ORIGINAL, mode_sysarg);
         char orig_path[PATH_MAX];
