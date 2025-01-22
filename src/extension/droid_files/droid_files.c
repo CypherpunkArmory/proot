@@ -32,14 +32,12 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
         return size;
     if (size >= PATH_MAX)
         return -ENAMETOOLONG;
-    if(strlen(orig_path) > 0)
-        if(belongs_to_guestfs(tracee, orig_path)) //easy early abort if the path is part of the guestfs
-            return 1;
-
-    VERBOSE(tracee, 1, "droid_files path: %s", orig_path);
-
+    if (strlen(orig_path) <= strlen(check_path))
+        return 0;
     if (strncmp(orig_path, check_path, strlen(check_path)) != 0)
         return 0;
+
+    VERBOSE(tracee, 4, "%s: orig_path = %s", __PRETTY_FUNCTION__, orig_path);
 
     set_sysnum(tracee, PR_socket);
     poke_reg(tracee, SYSARG_1, AF_UNIX);
@@ -63,11 +61,12 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
     return 0;
 }
 
-int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
-    word_t sysnum;
+int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, Reg mode_sysarg) {
+    word_t sysnum, orig_sysnum;
     word_t result;
     size_t size;
 
+    orig_sysnum = get_sysnum(tracee, ORIGINAL);
     sysnum = get_sysnum(tracee, CURRENT);
     switch (sysnum) {
     case PR_socket:
@@ -82,7 +81,6 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         char sock_path[PATH_MAX];
 	translate_path(tracee, sock_path, AT_FDCWD, DROID_FILES_SOCKNAME, true);
         sprintf(sockaddr.sun_path, "%s", sock_path);
-        VERBOSE(tracee, 1, "droid_files path: %s", sock_path);
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
         tracee->word_store[2] = (word_t)-1;
@@ -95,7 +93,19 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
             return -EINVAL;
         }
         sock_req_t sock_req;
-        sock_req.sysCall = 1;
+	if (orig_sysnum == PR_open) {
+            sock_req.sysCall = 0; //should come up with some sort of enum or similar
+	} else if (orig_sysnum == PR_openat) {
+            sock_req.sysCall = 1;
+	} else {
+            sock_req.sysCall = 2;
+        }
+        if (orig_sysnum != PR_creat) {
+	    sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
+        } else {
+            sock_reg.sysargs[0] = 0;
+        }
+	sock_req.sysargs[1] = peek_reg(tracee, ORIGINAL, mode_sysarg);
         char orig_path[PATH_MAX];
         size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
         strcpy(sock_req.path, orig_path);
@@ -111,13 +121,9 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         }
 
         char nothing = '!';
-        VERBOSE(tracee, 4, "%s: Write to word_store[4]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[4], &nothing, 1);
-        VERBOSE(tracee, 4, "%s: Wrote to word_store[4]", __PRETTY_FUNCTION__);
         struct iovec nothing_ptr = { .iov_base = (void *)tracee->word_store[4], .iov_len = 1 };
-        VERBOSE(tracee, 4, "%s: Write to word_store[5]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[5], &nothing_ptr, sizeof(nothing_ptr));
-        VERBOSE(tracee, 4, "%s: Wrote to word_store[5]", __PRETTY_FUNCTION__);
         struct {
             struct cmsghdr align;
             int fd[1];
@@ -126,9 +132,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
         ancillary_data_buffer.align.cmsg_len = sizeof(struct cmsghdr) + sizeof(int);
         ancillary_data_buffer.align.cmsg_level = SOL_SOCKET;
         ancillary_data_buffer.align.cmsg_type = SCM_RIGHTS;
-        VERBOSE(tracee, 4, "%s: Write to word_store[6]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[6], &ancillary_data_buffer, sizeof(ancillary_data_buffer));
-        VERBOSE(tracee, 4, "%s: Wrote to word_store[6]", __PRETTY_FUNCTION__);
 
         struct msghdr message_header = {
             .msg_name = NULL,
@@ -139,15 +143,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg) {
             .msg_control = (void *)tracee->word_store[6],
             .msg_controllen = sizeof(struct cmsghdr) + sizeof(int)
         };
-	/*
-        struct cmsghdr* cmsg = CMSG_FIRSTHDR(&message_header);
-        cmsg->cmsg_len = message_header.msg_controllen; // sizeof(int);
-        cmsg->cmsg_level = SOL_SOCKET;
-        cmsg->cmsg_type = SCM_RIGHTS;
-	*/
-        VERBOSE(tracee, 4, "%s: Write to word_store[7]", __PRETTY_FUNCTION__);
         write_data(tracee, tracee->word_store[7], &message_header, sizeof(struct msghdr));
-        VERBOSE(tracee, 4, "%s: Wrote to word_store[7]", __PRETTY_FUNCTION__);
 
         register_chained_syscall(tracee, PR_recvmsg, tracee->word_store[1], tracee->word_store[7], 0, 0, 0, 0);
         return 0;
@@ -214,10 +210,11 @@ static int handle_sysexit_end(Tracee *tracee)
     /* int open(const char *pathname, int flags, mode_t mode) */
     /* int creat(const char *pathname, mode_t mode) */
     case PR_openat:
-        return handle_open_sysexit_end(tracee, SYSARG_2);
+        return handle_open_sysexit_end(tracee, SYSARG_2, SYSARG_3, SYSARG_4);
     case PR_open:
+        return handle_open_sysexit_end(tracee, SYSARG_1, SYSARG_2, SYSARG_3);
     case PR_creat:
-        return handle_open_sysexit_end(tracee, SYSARG_1);
+        return handle_open_sysexit_end(tracee, SYSARG_1, IGNORE_SYSARG, SYSARG_2);
 
     default:
         return 0;
