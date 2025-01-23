@@ -132,8 +132,8 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             return 0;
         }
 	word_t curr_status = 1;
-        result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
-        if (((size_t)result != sizeof(word_t)) || (curr_status != 0)) {
+        read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
+        if (curr_status != 0) {
             VERBOSE(tracee, 4, "%s: Error code received", __PRETTY_FUNCTION__);
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
