@@ -57,6 +57,7 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
     } ancillary_data_buffer;
     tracee->word_store[6] = alloc_mem(tracee, sizeof(ancillary_data_buffer));
     tracee->word_store[7] = alloc_mem(tracee, sizeof(struct msghdr));
+    tracee->word_store[8] = alloc_mem(tracee, sizeof(word_t)); //status / error code
 
     return 0;
 }
@@ -84,6 +85,8 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
         tracee->word_store[2] = (word_t)-1;
+	word_t init_status = 0;
+        write_data(tracee, tracee->word_store[8], &init_status, sizeof(word_t));
         register_chained_syscall(tracee, PR_connect, result, tracee->word_store[0], sizeof(sockaddr), 0, 0, 0);
         return 0;
     case PR_connect:
@@ -103,7 +106,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         if (orig_sysnum != PR_creat) {
 	    sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
         } else {
-            sock_req.sysargs[0] = 0;
+            sock_req.sysargs[0] = O_CREAT | O_WRONLY | O_TRUNC;
         }
 	sock_req.sysargs[1] = peek_reg(tracee, ORIGINAL, mode_sysarg);
         char orig_path[PATH_MAX];
@@ -116,6 +119,22 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
         if ((size_t)result != sizeof(sock_req_t)) {
             VERBOSE(tracee, 4, "%s: Failed to write UNIX socket", __PRETTY_FUNCTION__);
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
+        register_chained_syscall(tracee, PR_read, tracee->word_store[1], tracee->word_store[8], sizeof(word_t), 0, 0, 0);
+        return 0;
+    case PR_read:
+        result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+        if ((size_t)result != sizeof(word_t)) {
+            VERBOSE(tracee, 4, "%s: Failed to read UNIX socket", __PRETTY_FUNCTION__);
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
+	word_t curr_status = 1;
+        result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
+        if (((size_t)result != sizeof(word_t)) || (curr_status != 0)) {
+            VERBOSE(tracee, 4, "%s: Error code received", __PRETTY_FUNCTION__);
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
@@ -169,6 +188,10 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         return 0;
     case PR_close: {
         poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
+	word_t curr_status = 1;
+        result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
+	if (curr_status != 0)
+            return -curr_status;
         if ((int)tracee->word_store[2] == -1)
             return -EINVAL;
     }
@@ -232,9 +255,11 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
     case INITIALIZATION: {
         /* List of syscalls handled by this extension */
         static FilteredSysnum filtered_sysnums[] = {
-            { PR_open,   FILTER_SYSEXIT },
-            { PR_openat, FILTER_SYSEXIT },
-            { PR_creat,  FILTER_SYSEXIT },
+            { PR_open,    FILTER_SYSEXIT },
+            { PR_openat,  FILTER_SYSEXIT },
+            { PR_creat,   FILTER_SYSEXIT },
+            { PR_mkdir,   FILTER_SYSEXIT },
+            { PR_mkdirat, FILTER_SYSEXIT },
             FILTERED_SYSNUM_END,
         };
         extension->filtered_sysnums = filtered_sysnums;
