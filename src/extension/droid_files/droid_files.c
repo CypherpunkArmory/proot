@@ -19,6 +19,7 @@
 typedef struct {
     word_t sysCall;
     char path[4096];
+    char new_path[4096];
     word_t sysargs[5];
 } sock_req_t;
 
@@ -100,10 +101,16 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             sock_req.sysCall = 0; //should come up with some sort of enum or similar
 	} else if (orig_sysnum == PR_openat) {
             sock_req.sysCall = 1;
-	} else {
+	} else if (orig_sysnum == PR_creat) {
             sock_req.sysCall = 2;
+	} else if (orig_sysnum == PR_mkdir) {
+            sock_req.sysCall = 3;
+	} else /*if (orig_sysnum == PR_mkdirat)*/ {
+            sock_req.sysCall = 4;
         }
-        if (orig_sysnum != PR_creat) {
+	if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
+	    sock_req.sysargs[0] = 0;
+	} else if (orig_sysnum != PR_creat) {
 	    sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
         } else {
             sock_req.sysargs[0] = O_CREAT | O_WRONLY | O_TRUNC;
@@ -135,6 +142,10 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
         if (curr_status != 0) {
             VERBOSE(tracee, 4, "%s: Error code received", __PRETTY_FUNCTION__);
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
+        if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
@@ -212,8 +223,10 @@ static int handle_sysenter_end(Tracee *tracee)
     /* int openat(int dirfd, const char *pathname, int flags, mode_t mode) */
     /* int open(const char *pathname, int flags, mode_t mode) */
     /* int creat(const char *pathname, mode_t mode) */
+    case PR_mkdirat:
     case PR_openat:
         return handle_open_sysenter_end(tracee, SYSARG_2);
+    case PR_mkdir:
     case PR_open:
     case PR_creat:
         return handle_open_sysenter_end(tracee, SYSARG_1);
@@ -236,8 +249,11 @@ static int handle_sysexit_end(Tracee *tracee)
         return handle_open_sysexit_end(tracee, SYSARG_2, SYSARG_3, SYSARG_4);
     case PR_open:
         return handle_open_sysexit_end(tracee, SYSARG_1, SYSARG_2, SYSARG_3);
+    case PR_mkdir:
     case PR_creat:
         return handle_open_sysexit_end(tracee, SYSARG_1, IGNORE_SYSARG, SYSARG_2);
+    case PR_mkdirat:
+        return handle_open_sysexit_end(tracee, SYSARG_2, IGNORE_SYSARG, SYSARG_3);
 
     default:
         return 0;
@@ -255,11 +271,16 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
     case INITIALIZATION: {
         /* List of syscalls handled by this extension */
         static FilteredSysnum filtered_sysnums[] = {
-            { PR_open,    FILTER_SYSEXIT },
-            { PR_openat,  FILTER_SYSEXIT },
-            { PR_creat,   FILTER_SYSEXIT },
-            { PR_mkdir,   FILTER_SYSEXIT },
-            { PR_mkdirat, FILTER_SYSEXIT },
+            { PR_open,      FILTER_SYSEXIT },
+            { PR_openat,    FILTER_SYSEXIT },
+            { PR_creat,     FILTER_SYSEXIT },
+            { PR_mkdir,     FILTER_SYSEXIT },
+            { PR_mkdirat,   FILTER_SYSEXIT },
+            { PR_unlink,    FILTER_SYSEXIT },
+            { PR_unlinkat,  FILTER_SYSEXIT },
+            { PR_rename,    FILTER_SYSEXIT },
+            { PR_renameat,  FILTER_SYSEXIT },
+            { PR_renameat2, FILTER_SYSEXIT },
             FILTERED_SYSNUM_END,
         };
         extension->filtered_sysnums = filtered_sysnums;
