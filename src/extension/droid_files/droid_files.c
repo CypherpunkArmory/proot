@@ -81,12 +81,12 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         memset(&sockaddr, 0, sizeof(sockaddr));
         sockaddr.sun_family = AF_UNIX;
         char sock_path[PATH_MAX];
-	translate_path(tracee, sock_path, AT_FDCWD, DROID_FILES_SOCKNAME, true);
+        translate_path(tracee, sock_path, AT_FDCWD, DROID_FILES_SOCKNAME, true);
         sprintf(sockaddr.sun_path, "%s", sock_path);
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
         tracee->word_store[2] = (word_t)-1;
-	word_t init_status = 0;
+        word_t init_status = 0;
         write_data(tracee, tracee->word_store[8], &init_status, sizeof(word_t));
         register_chained_syscall(tracee, PR_connect, result, tracee->word_store[0], sizeof(sockaddr), 0, 0, 0);
         return 0;
@@ -97,25 +97,35 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             return -EINVAL;
         }
         sock_req_t sock_req;
-	if (orig_sysnum == PR_open) {
+        if (orig_sysnum == PR_open) {
             sock_req.sysCall = 0; //should come up with some sort of enum or similar
-	} else if (orig_sysnum == PR_openat) {
+        } else if (orig_sysnum == PR_openat) {
             sock_req.sysCall = 1;
-	} else if (orig_sysnum == PR_creat) {
+        } else if (orig_sysnum == PR_creat) {
             sock_req.sysCall = 2;
-	} else if (orig_sysnum == PR_mkdir) {
+        } else if (orig_sysnum == PR_mkdir) {
             sock_req.sysCall = 3;
-	} else /*if (orig_sysnum == PR_mkdirat)*/ {
+        } else if (orig_sysnum == PR_mkdirat) {
             sock_req.sysCall = 4;
+        } else if (orig_sysnum == PR_unlink) {
+            sock_req.sysCall = 5;
+        } else /*if (orig_sysnum == PR_unlinkat)*/ {
+            sock_req.sysCall = 6;
         }
-	if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
-	    sock_req.sysargs[0] = 0;
-	} else if (orig_sysnum != PR_creat) {
-	    sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
+        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat)) {
+            sock_req.sysargs[0] = 0;
+        } else if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
+            sock_req.sysargs[0] = 0;
+        } else if (orig_sysnum != PR_creat) {
+            sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
         } else {
             sock_req.sysargs[0] = O_CREAT | O_WRONLY | O_TRUNC;
         }
-	sock_req.sysargs[1] = peek_reg(tracee, ORIGINAL, mode_sysarg);
+        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat)) {
+            sock_req.sysargs[1] = 0;
+        } else {
+            sock_req.sysargs[1] = peek_reg(tracee, ORIGINAL, mode_sysarg);
+        }
         char orig_path[PATH_MAX];
         size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
         strcpy(sock_req.path, orig_path);
@@ -138,7 +148,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
-	word_t curr_status = 1;
+        word_t curr_status = 1;
         read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
         if (curr_status != 0) {
             VERBOSE(tracee, 4, "%s: Error code received", __PRETTY_FUNCTION__);
@@ -146,6 +156,10 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             return 0;
         }
         if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
+        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat)) {
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
@@ -199,10 +213,14 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         return 0;
     case PR_close: {
         poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
-	word_t curr_status = 1;
+        word_t curr_status = 1;
         result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
-	if (curr_status != 0)
+        if (curr_status != 0)
             return -curr_status;
+        if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat))
+            return 0;
+        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat))
+            return 0;
         if ((int)tracee->word_store[2] == -1)
             return -EINVAL;
     }
@@ -220,12 +238,11 @@ static int handle_sysenter_end(Tracee *tracee)
 
     sysnum = get_sysnum(tracee, ORIGINAL);
     switch (sysnum) {
-    /* int openat(int dirfd, const char *pathname, int flags, mode_t mode) */
-    /* int open(const char *pathname, int flags, mode_t mode) */
-    /* int creat(const char *pathname, mode_t mode) */
+    case PR_unlinkat:
     case PR_mkdirat:
     case PR_openat:
         return handle_open_sysenter_end(tracee, SYSARG_2);
+    case PR_unlink:
     case PR_mkdir:
     case PR_open:
     case PR_creat:
@@ -242,9 +259,6 @@ static int handle_sysexit_end(Tracee *tracee)
 
     sysnum = get_sysnum(tracee, ORIGINAL);
     switch (sysnum) {
-    /* int openat(int dirfd, const char *pathname, int flags, mode_t mode) */
-    /* int open(const char *pathname, int flags, mode_t mode) */
-    /* int creat(const char *pathname, mode_t mode) */
     case PR_openat:
         return handle_open_sysexit_end(tracee, SYSARG_2, SYSARG_3, SYSARG_4);
     case PR_open:
@@ -254,6 +268,10 @@ static int handle_sysexit_end(Tracee *tracee)
         return handle_open_sysexit_end(tracee, SYSARG_1, IGNORE_SYSARG, SYSARG_2);
     case PR_mkdirat:
         return handle_open_sysexit_end(tracee, SYSARG_2, IGNORE_SYSARG, SYSARG_3);
+    case PR_unlinkat:
+        return handle_open_sysexit_end(tracee, SYSARG_2, IGNORE_SYSARG, IGNORE_SYSARG);
+    case PR_unlink:
+        return handle_open_sysexit_end(tracee, SYSARG_1, IGNORE_SYSARG, IGNORE_SYSARG);
 
     default:
         return 0;
@@ -278,9 +296,9 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
             { PR_mkdirat,   FILTER_SYSEXIT },
             { PR_unlink,    FILTER_SYSEXIT },
             { PR_unlinkat,  FILTER_SYSEXIT },
-            { PR_rename,    FILTER_SYSEXIT },
-            { PR_renameat,  FILTER_SYSEXIT },
-            { PR_renameat2, FILTER_SYSEXIT },
+            //{ PR_rename,    FILTER_SYSEXIT }, TODO: need to handle these, but need to figure out when it spans directories possibly inside and outside of the rootfs
+            //{ PR_renameat,  FILTER_SYSEXIT },
+            //{ PR_renameat2, FILTER_SYSEXIT },
             FILTERED_SYSNUM_END,
         };
         extension->filtered_sysnums = filtered_sysnums;
