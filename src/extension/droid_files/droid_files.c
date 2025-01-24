@@ -212,7 +212,6 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
         return 0;
     case PR_close: {
-        poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
         word_t curr_status = 1;
         result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
         if (curr_status != 0)
@@ -221,6 +220,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             return 0;
         if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat))
             return 0;
+        poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
         if ((int)tracee->word_store[2] == -1)
             return -EINVAL;
     }
