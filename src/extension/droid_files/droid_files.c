@@ -134,7 +134,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             sock_req.sysCall = 6;
         } else if (orig_sysnum == PR_getdents) {
             sock_req.sysCall = 7;
-        } else if (orig_sysnum == PR_getdentsat) {
+        } else if (orig_sysnum == PR_getdents64) {
             sock_req.sysCall = 8;
         }
         if (orig_sysnum == PR_creat) {
@@ -196,7 +196,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
 	    int dirents_fd;
 	    char dirents_buf[1000];
             translate_path(tracee, dirents_path, AT_FDCWD, DROID_FILES_GETDENTSNAME, true);
-	    dirents_fd = open(dirents_path, "r");
+	    dirents_fd = fopen(dirents_path, "r");
             size = read(dirents_fd, dirents_buf, 1000);
 	    close(dirents_fd);
             write_data(tracee, peek_reg(tracee, ORIGINAL, SYSARG_2), dirents_buf, size);
