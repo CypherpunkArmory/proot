@@ -15,6 +15,7 @@
 #include "extension/fake_id0/helper_functions.h"
 
 #define DROID_FILES_SOCKNAME "/support/common/droid_files_socket"
+#define DROID_FILES_GETDENTSNAME "/support/common/droid_files_getdents"
 
 typedef struct {
     word_t sysCall;
@@ -23,12 +24,30 @@ typedef struct {
     word_t sysargs[5];
 } sock_req_t;
 
-int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
+struct linux_dirent {
+    unsigned long d_ino;
+    unsigned long d_off;
+    unsigned short d_reclen;
+    char d_name[];
+};
+
+struct linux_dirent64 {
+    unsigned long long d_ino;
+    long long d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[];
+};
+
+int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     int size;
     char check_path[] = "/sdcard/";
     char orig_path[PATH_MAX];
     
-    size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
+    if (path_sysarg != IGNORE_SYSARG) 
+        size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
+    else
+        size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), orig_path);
     if (size < 0) //return errors
         return size;
     if (size >= PATH_MAX)
@@ -63,7 +82,7 @@ int handle_open_sysenter_end(Tracee *tracee, Reg path_sysarg) {
     return 0;
 }
 
-int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, Reg mode_sysarg) {
+int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg flags_sysarg, Reg mode_sysarg) {
     word_t sysnum, orig_sysnum;
     word_t result;
     size_t size;
@@ -85,7 +104,9 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         sprintf(sockaddr.sun_path, "%s", sock_path);
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
-        tracee->word_store[2] = (word_t)-1;
+        tracee->word_store[2] = (word_t)0;
+        if ((orig_sysnum == PR_open) || (orig_sysnum == PR_openat) || (orig_sysnum == PR_creat))
+            tracee->word_store[2] = (word_t)-1;
         word_t init_status = 0;
         write_data(tracee, tracee->word_store[8], &init_status, sizeof(word_t));
         register_chained_syscall(tracee, PR_connect, result, tracee->word_store[0], sizeof(sockaddr), 0, 0, 0);
@@ -109,25 +130,30 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             sock_req.sysCall = 4;
         } else if (orig_sysnum == PR_unlink) {
             sock_req.sysCall = 5;
-        } else /*if (orig_sysnum == PR_unlinkat)*/ {
+        } else if (orig_sysnum == PR_unlinkat) {
             sock_req.sysCall = 6;
+        } else if (orig_sysnum == PR_getdents) {
+            sock_req.sysCall = 7;
+        } else if (orig_sysnum == PR_getdentsat) {
+            sock_req.sysCall = 8;
         }
-        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat)) {
-            sock_req.sysargs[0] = 0;
-        } else if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
-            sock_req.sysargs[0] = 0;
-        } else if (orig_sysnum != PR_creat) {
+        if (orig_sysnum == PR_creat) {
+            sock_req.sysargs[0] = O_CREAT | O_WRONLY | O_TRUNC;
+	} else if (flags_sysarg != IGNORE_SYSARG) {
             sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
         } else {
-            sock_req.sysargs[0] = O_CREAT | O_WRONLY | O_TRUNC;
+            sock_req.sysargs[0] = 0;
         }
-        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat)) {
-            sock_req.sysargs[1] = 0;
-        } else {
+        if (mode_sysarg != IGNORE_SYSARG) {
             sock_req.sysargs[1] = peek_reg(tracee, ORIGINAL, mode_sysarg);
+        } else {
+            sock_req.sysargs[1] = 0;
         }
         char orig_path[PATH_MAX];
-        size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
+        if (path_sysarg != IGNORE_SYSARG) 
+            size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
+        else
+            size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), orig_path);
         strcpy(sock_req.path, orig_path);
         write_data(tracee, tracee->word_store[3], &sock_req, sizeof(sock_req_t));
         register_chained_syscall(tracee, PR_write, tracee->word_store[1], tracee->word_store[3], sizeof(sock_req), 0, 0, 0);
@@ -142,6 +168,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         register_chained_syscall(tracee, PR_read, tracee->word_store[1], tracee->word_store[8], sizeof(word_t), 0, 0, 0);
         return 0;
     case PR_read:
+        tracee->word_store[9] = 1; //itteration count
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
         if ((size_t)result != sizeof(word_t)) {
             VERBOSE(tracee, 4, "%s: Failed to read UNIX socket", __PRETTY_FUNCTION__);
@@ -163,7 +190,21 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
-
+        if ((orig_sysnum == PR_getdents) || (orig_sysnum == PR_getdents64)) {
+            //read data from the dirents file and they write it to the tracee at the buffer location
+            char dirents_path[PATH_MAX];
+	    int dirents_fd;
+	    char dirents_buf[1000];
+            translate_path(tracee, dirents_path, AT_FDCWD, DROID_FILES_GETDENTSNAME, true);
+	    dirents_fd = open(dirents_path, "r");
+            size = read(dirents_fd, dirents_buf, 1000);
+	    close(dirents_fd);
+            write_data(tracee, peek_reg(tracee, ORIGINAL, SYSARG_2), dirents_buf, size);
+            tracee->word_store[2] = (word_t)size;
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
+ 
         char nothing = '!';
         write_data(tracee, tracee->word_store[4], &nothing, 1);
         struct iovec nothing_ptr = { .iov_base = (void *)tracee->word_store[4], .iov_len = 1 };
@@ -213,6 +254,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
         return 0;
     case PR_close: {
         word_t curr_status = 1;
+        poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
         result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
         if (curr_status != 0)
             return -curr_status;
@@ -220,7 +262,6 @@ int handle_open_sysexit_end(Tracee *tracee, Reg path_sysarg, Reg flags_sysarg, R
             return 0;
         if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat))
             return 0;
-        poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
         if ((int)tracee->word_store[2] == -1)
             return -EINVAL;
     }
@@ -241,12 +282,15 @@ static int handle_sysenter_end(Tracee *tracee)
     case PR_unlinkat:
     case PR_mkdirat:
     case PR_openat:
-        return handle_open_sysenter_end(tracee, SYSARG_2);
+        return handle_open_sysenter_end(tracee, IGNORE_SYSARG, SYSARG_2);
     case PR_unlink:
     case PR_mkdir:
     case PR_open:
     case PR_creat:
-        return handle_open_sysenter_end(tracee, SYSARG_1);
+        return handle_open_sysenter_end(tracee, IGNORE_SYSARG, SYSARG_1);
+    case PR_getdents:
+    case PR_getdents64:
+        return handle_open_sysenter_end(tracee, SYSARG_1, IGNORE_SYSARG);
 
     default:
         return 0;
@@ -260,18 +304,21 @@ static int handle_sysexit_end(Tracee *tracee)
     sysnum = get_sysnum(tracee, ORIGINAL);
     switch (sysnum) {
     case PR_openat:
-        return handle_open_sysexit_end(tracee, SYSARG_2, SYSARG_3, SYSARG_4);
+        return handle_open_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_2, SYSARG_3, SYSARG_4);
     case PR_open:
-        return handle_open_sysexit_end(tracee, SYSARG_1, SYSARG_2, SYSARG_3);
+        return handle_open_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_1, SYSARG_2, SYSARG_3);
     case PR_mkdir:
     case PR_creat:
-        return handle_open_sysexit_end(tracee, SYSARG_1, IGNORE_SYSARG, SYSARG_2);
+        return handle_open_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_1, IGNORE_SYSARG, SYSARG_2);
     case PR_mkdirat:
-        return handle_open_sysexit_end(tracee, SYSARG_2, IGNORE_SYSARG, SYSARG_3);
+        return handle_open_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_2, IGNORE_SYSARG, SYSARG_3);
     case PR_unlinkat:
-        return handle_open_sysexit_end(tracee, SYSARG_2, IGNORE_SYSARG, IGNORE_SYSARG);
+        return handle_open_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_2, IGNORE_SYSARG, IGNORE_SYSARG);
     case PR_unlink:
-        return handle_open_sysexit_end(tracee, SYSARG_1, IGNORE_SYSARG, IGNORE_SYSARG);
+        return handle_open_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_1, IGNORE_SYSARG, IGNORE_SYSARG);
+    case PR_getdents:
+    case PR_getdents64:
+        return handle_open_sysexit_end(tracee, SYSARG_1, IGNORE_SYSARG, IGNORE_SYSARG, IGNORE_SYSARG);
 
     default:
         return 0;
@@ -289,13 +336,15 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
     case INITIALIZATION: {
         /* List of syscalls handled by this extension */
         static FilteredSysnum filtered_sysnums[] = {
-            { PR_open,      FILTER_SYSEXIT },
-            { PR_openat,    FILTER_SYSEXIT },
-            { PR_creat,     FILTER_SYSEXIT },
-            { PR_mkdir,     FILTER_SYSEXIT },
-            { PR_mkdirat,   FILTER_SYSEXIT },
-            { PR_unlink,    FILTER_SYSEXIT },
-            { PR_unlinkat,  FILTER_SYSEXIT },
+            { PR_open,       FILTER_SYSEXIT },
+            { PR_openat,     FILTER_SYSEXIT },
+            { PR_creat,      FILTER_SYSEXIT },
+            { PR_mkdir,      FILTER_SYSEXIT },
+            { PR_mkdirat,    FILTER_SYSEXIT },
+            { PR_unlink,     FILTER_SYSEXIT },
+            { PR_unlinkat,   FILTER_SYSEXIT },
+            { PR_getdents,   FILTER_SYSEXIT },
+            { PR_getdents64, FILTER_SYSEXIT },
             //{ PR_rename,    FILTER_SYSEXIT }, TODO: need to handle these, but need to figure out when it spans directories possibly inside and outside of the rootfs
             //{ PR_renameat,  FILTER_SYSEXIT },
             //{ PR_renameat2, FILTER_SYSEXIT },
