@@ -44,10 +44,12 @@ int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     char check_path[] = "/sdcard/";
     char orig_path[PATH_MAX];
     
-    if (path_sysarg != IGNORE_SYSARG) 
+    if (path_sysarg != IGNORE_SYSARG) {
         size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
-    else
+    } else {
         size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), orig_path);
+        VERBOSE(tracee, 4, "%s: getdents orig_path = %s", __PRETTY_FUNCTION__, orig_path);
+    }
     if (size < 0) //return errors
         return size;
     if (size >= PATH_MAX)
