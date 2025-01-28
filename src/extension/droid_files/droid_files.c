@@ -42,22 +42,34 @@ struct linux_dirent64 {
 int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     int size;
     char check_path[] = "/sdcard/";
+    char translated_check_path[PATH_MAX];
     char orig_path[PATH_MAX];
     
     if (path_sysarg != IGNORE_SYSARG) {
         size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
     } else {
         size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), orig_path);
+	trans
         VERBOSE(tracee, 4, "%s: getdents orig_path = %s", __PRETTY_FUNCTION__, orig_path);
     }
-    if (size < 0) //return errors
+    if (size < 0)
         return size;
     if (size >= PATH_MAX)
         return -ENAMETOOLONG;
-    if (strlen(orig_path) <= strlen(check_path))
-        return 0;
-    if (strncmp(orig_path, check_path, strlen(check_path)) != 0)
-        return 0;
+    
+    if (path_sysarg != IGNORE_SYSARG) {
+        if (strlen(orig_path) <= strlen(check_path))
+            return 0;
+        if (strncmp(orig_path, check_path, strlen(check_path)) != 0)
+            return 0;
+    } else {
+        translate_path(tracee, translated_check_path, AT_FDCWD, check_path, true);
+        VERBOSE(tracee, 4, "%s: getdents translated_check_path = %s", __PRETTY_FUNCTION__, translated_check_path);
+        if (strlen(orig_path) <= strlen(translated_check_path))
+            return 0;
+        if (strncmp(orig_path, translated_check_path, strlen(translated_check_path)) != 0)
+            return 0;
+    }
 
     VERBOSE(tracee, 4, "%s: orig_path = %s", __PRETTY_FUNCTION__, orig_path);
 
