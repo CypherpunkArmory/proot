@@ -190,6 +190,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         word_t curr_status = 2;
         read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
         if (((orig_sysnum == PR_getdents) || (orig_sysnum == PR_getdents64)) && (curr_status == 1)) {
+            VERBOSE(tracee, 4, "%s: Should be last getdents call", __PRETTY_FUNCTION__);
             tracee->word_store[2] = (word_t)0;
             word_t new_status = 0;
             write_data(tracee, tracee->word_store[8], &new_status, sizeof(word_t));
@@ -216,6 +217,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             translate_path(tracee, dirents_path, AT_FDCWD, DROID_FILES_GETDENTSNAME, true);
             dirents_fd = open(dirents_path, O_RDONLY);
             size = read(dirents_fd, dirents_buf, 1000);
+            VERBOSE(tracee, 4, "%s: dirents read size = %d", __PRETTY_FUNCTION__, size);
             close(dirents_fd);
             write_data(tracee, peek_reg(tracee, ORIGINAL, SYSARG_2), dirents_buf, size);
             tracee->word_store[2] = (word_t)size;
