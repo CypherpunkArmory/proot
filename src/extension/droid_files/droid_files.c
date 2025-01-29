@@ -29,8 +29,6 @@ struct linux_dirent {
     unsigned long d_off;
     unsigned short d_reclen;
     char d_name[];
-    unsigned char pad;
-    unsigned char d_type;
 };
 
 struct linux_dirent64 {
@@ -226,7 +224,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
                 char *ptr = dirents_buf;
                 struct linux_dirent *curr32;
                 curr32 = (struct linux_dirent *)ptr;
-                VERBOSE(tracee, 4, "dirents d_ino = %lu d_off = %lu d_reclen = %hu d_type = %u d_name = %s",  curr32->d_ino, curr32->d_off, curr32->d_reclen, curr32->d_type, curr32->d_name);
+                VERBOSE(tracee, 4, "dirents d_ino = %lu d_off = %lu d_reclen = %hu d_name = %s",  curr32->d_ino, curr32->d_off, curr32->d_reclen, curr32->d_name);
             } else {
                 char *ptr = dirents_buf;
                 struct linux_dirent64 *curr64;
