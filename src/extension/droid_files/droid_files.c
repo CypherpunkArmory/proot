@@ -29,6 +29,8 @@ struct linux_dirent {
     unsigned long d_off;
     unsigned short d_reclen;
     char d_name[];
+    unsigned char pad;
+    unsigned char d_type;
 };
 
 struct linux_dirent64 {
@@ -210,6 +212,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
+
         if ((orig_sysnum == PR_getdents) || (orig_sysnum == PR_getdents64)) {
             char dirents_path[PATH_MAX];
             int dirents_fd;
@@ -217,7 +220,20 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             translate_path(tracee, dirents_path, AT_FDCWD, DROID_FILES_GETDENTSNAME, true);
             dirents_fd = open(dirents_path, O_RDONLY);
             size = read(dirents_fd, dirents_buf, 1000);
-            VERBOSE(tracee, 4, "%s: dirents read size = %d", __PRETTY_FUNCTION__, size);
+            VERBOSE(tracee, 4, "%s: dirents read size = %lu", __PRETTY_FUNCTION__, size);
+
+            if (orig_sysnum == PR_getdents) {
+                char *ptr = dirents_buf;
+                struct linux_dirent *curr32;
+                curr32 = (struct linux_dirent *)ptr;
+                VERBOSE(tracee, 4, "dirents d_ino = %lu d_off = %lu d_reclen = %hu d_type = %u d_name = %s",  curr32->d_ino, curr32->d_off, curr32->d_reclen, curr32->d_type, curr32->d_name);
+            } else {
+                char *ptr = dirents_buf;
+                struct linux_dirent64 *curr64;
+                curr64 = (struct linux_dirent64 *)ptr;
+                VERBOSE(tracee, 4, "dirents d_ino = %llu d_off = %llu d_reclen = %hu d_type = %u d_name = %s",  curr64->d_ino, curr64->d_off, curr64->d_reclen, curr64->d_type, curr64->d_name);
+            }
+
             close(dirents_fd);
             write_data(tracee, peek_reg(tracee, ORIGINAL, SYSARG_2), dirents_buf, size);
             tracee->word_store[2] = (word_t)size;
