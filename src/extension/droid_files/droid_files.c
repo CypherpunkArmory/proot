@@ -44,7 +44,7 @@ struct linux_dirent64 {
     char d_name[];
 };
 
-int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
+int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     int size, status;
     char check_path[] = DROID_FILES_CHECKPATH;
     char translated_check_path[PATH_MAX];
@@ -54,7 +54,7 @@ int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
         size = read_string(tracee, orig_path, peek_reg(tracee, CURRENT, path_sysarg), PATH_MAX);
     } else {
         size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, CURRENT, fd_sysarg), orig_path);
-        VERBOSE(tracee, 4, "%s: getdents orig_path = %s", __PRETTY_FUNCTION__, orig_path);
+        VERBOSE(tracee, 4, "%s: droid_files orig_path = %s", __PRETTY_FUNCTION__, orig_path);
     }
     if (size < 0)
         return size;
@@ -64,14 +64,30 @@ int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     status = translate_path(tracee, translated_check_path, AT_FDCWD, check_path, true);
     if (status < 0)
         return status;
-        VERBOSE(tracee, 4, "%s: getdents translated_check_path = %s", __PRETTY_FUNCTION__, translated_check_path);
 
-    if (strlen(orig_path) <= strlen(translated_check_path))
-        return 0;
-    if (strncmp(orig_path, translated_check_path, strlen(translated_check_path)) != 0)
-        return 0;
+    VERBOSE(tracee, 4, "%s: droid_files translated_check_path = %s", __PRETTY_FUNCTION__, translated_check_path);
 
-    VERBOSE(tracee, 4, "%s: orig_path = %s", __PRETTY_FUNCTION__, orig_path);
+    if (strlen(orig_path) > strlen(translated_check_path))
+        if (strncmp(orig_path, translated_check_path, strlen(translated_check_path)) == 0)
+            return 1;
+
+    VERBOSE(tracee, 4, "%s: droid_files check_path2 = %s", __PRETTY_FUNCTION__, check_path2);
+
+    if (strlen(orig_path) > strlen(check_path2))
+        if (strncmp(orig_path, check_path2, strlen(check_path2)) == 0)
+            return 1;
+
+    return 0;
+}
+
+int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
+    int status;
+    
+    status = check_paths(tracee, fd_sysarg, path_sysarg);
+    if (status <= 0)
+        return status;
+
+    VERBOSE(tracee, 4, "%s: droid_files path match found", __PRETTY_FUNCTION__);
 
     set_sysnum(tracee, PR_socket);
     poke_reg(tracee, SYSARG_1, AF_UNIX);
@@ -164,11 +180,17 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             sock_req.sysargs[1] = 0;
         }
         char orig_path[PATH_MAX];
-        if (path_sysarg != IGNORE_SYSARG) 
+        char path[PATH_MAX];
+        if (path_sysarg != IGNORE_SYSARG) {
             size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
-        else
-            size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), orig_path);
-        strcpy(sock_req.path, orig_path);
+            status = translate_path(tracee, path, AT_FDCWD, orig_path, true);
+            if (status < 0)
+                return status;
+	} else {
+            size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), path);
+	}
+	status = detranslate_path(tracee, path, NULL);
+        strcpy(sock_req.path, path);
         write_data(tracee, tracee->word_store[3], &sock_req, sizeof(sock_req_t));
         register_chained_syscall(tracee, PR_write, tracee->word_store[1], tracee->word_store[3], sizeof(sock_req), 0, 0, 0);
         return 0;
@@ -283,6 +305,12 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             int fd[1];
         } ancillary_data_buffer_2;
         read_data(tracee, &ancillary_data_buffer_2, (word_t)message_header_2.msg_control, sizeof(ancillary_data_buffer_2));
+
+        size = readlink_proc_pid_fd(tracee->pid, ancillary_data_buffer_2.fd[0], check_path2);
+	if (size < 0) {
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
 
         tracee->word_store[2] = ancillary_data_buffer_2.fd[0];
         register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
