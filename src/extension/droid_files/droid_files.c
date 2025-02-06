@@ -116,6 +116,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
     word_t sysnum, orig_sysnum;
     word_t result;
     size_t size;
+    int status;
 
     orig_sysnum = get_sysnum(tracee, ORIGINAL);
     sysnum = get_sysnum(tracee, CURRENT);
