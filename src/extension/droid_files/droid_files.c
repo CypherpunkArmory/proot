@@ -139,7 +139,7 @@ void modify_path(Tracee *tracee, char *path) {
 
     status = translate_path(tracee, translated_check_path, AT_FDCWD, check_path, true);
     if (status < 0)
-        return status;
+        return;
 
     strcpy(saved_path, path);
     strcpy(path, translated_check_path);
