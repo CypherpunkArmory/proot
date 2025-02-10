@@ -101,7 +101,6 @@ int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
     int size, status;
     char fd_path[PATH_MAX];
     char orig_path[PATH_MAX];
-    char translated_path[PATH_MAX];
     int common_length;
 
     size = readlink_proc_pid_fd(tracee->pid, fd, fd_path);
@@ -117,16 +116,35 @@ int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
         return -ENAMETOOLONG;
     VERBOSE(tracee, 4, "%s: droid_files orig_path = %s", __PRETTY_FUNCTION__, orig_path);
     
-    status = translate_path(tracee, translated_path, AT_FDCWD, orig_path, true);
-    if (status < 0)
-        return status;
-    VERBOSE(tracee, 4, "%s: droid_files translated_path = %s", __PRETTY_FUNCTION__, translated_path);
-
-    common_length = find_common_suffix_len(translated_path, fd_path);
+    common_length = find_common_suffix_len(orig_path, fd_path);
     strncpy(check_path2, fd_path, strlen(fd_path) - common_length);
     VERBOSE(tracee, 4, "%s: droid_files check_path2 = %s", __PRETTY_FUNCTION__, check_path2);
 
     return 0;
+}
+
+void modify_path(char *path) {
+    char check_path[] = DROID_FILES_CHECKPATH;
+    char translated_check_path[PATH_MAX];
+    char saved_path[PATH_MAX];
+
+    if (strlen(check_path2) <= 1) {
+        return;
+    }
+
+    if (strncmp(path, check_path2, strlen(check_path2)) != 0) {
+        return;
+    }
+
+    status = translate_path(tracee, translated_check_path, AT_FDCWD, check_path, true);
+    if (status < 0)
+        return status;
+
+    strcpy(saved_path, path);
+    strcpy(path, translated_check_path);
+    strcat(path, saved_path + strlen(check_path2));
+    VERBOSE(tracee, 4, "%s: droid_files path = %s", __PRETTY_FUNCTION__, path);
+    return;
 }
 
 int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
@@ -238,6 +256,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
                 return status;
 	} else {
             size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), path);
+	    modify_path(path);
 	}
 	status = detranslate_path(tracee, path, NULL);
         strcpy(sock_req.path, path);
