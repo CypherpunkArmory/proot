@@ -110,7 +110,7 @@ int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
     }
     VERBOSE(tracee, 4, "%s: droid_files fd_path = %s", __PRETTY_FUNCTION__, fd_path);
     
-    size = read_string(tracee, orig_path, peek_reg(tracee, CURRENT, path_sysarg), PATH_MAX);
+    size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
     if (size < 0)
         return size;
     if (size >= PATH_MAX)
