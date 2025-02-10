@@ -98,7 +98,7 @@ int find_common_suffix_len(const char* str1, const char* str2) {
 }
 
 int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
-    int size, status;
+    int size;
     char fd_path[PATH_MAX];
     char orig_path[PATH_MAX];
     int common_length;
@@ -123,7 +123,8 @@ int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
     return 0;
 }
 
-void modify_path(char *path) {
+void modify_path(Tracee *tracee, char *path) {
+    int status;
     char check_path[] = DROID_FILES_CHECKPATH;
     char translated_check_path[PATH_MAX];
     char saved_path[PATH_MAX];
@@ -256,7 +257,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
                 return status;
 	} else {
             size = readlink_proc_pid_fd(tracee->pid, peek_reg(tracee, ORIGINAL, fd_sysarg), path);
-	    modify_path(path);
+	    modify_path(tracee, path);
 	}
 	status = detranslate_path(tracee, path, NULL);
         strcpy(sock_req.path, path);
