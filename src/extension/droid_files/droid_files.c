@@ -81,6 +81,54 @@ int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     return 0;
 }
 
+int find_common_suffix_len(const char* str1, const char* str2) {
+    int len1 = strlen(str1);
+    int len2 = strlen(str2);
+    int i = len1 - 1;
+    int j = len2 - 1;
+    int count = 0;
+
+    while (i >= 0 && j >= 0 && str1[i] == str2[j]) {
+        i--;
+        j--;
+        count++;
+    }
+
+    return count;
+}
+
+int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
+    int size, status;
+    char fd_path[PATH_MAX];
+    char orig_path[PATH_MAX];
+    char translated_path[PATH_MAX];
+    int common_length;
+
+    size = readlink_proc_pid_fd(tracee->pid, ancillary_data_buffer_2.fd[0], fd_path);
+    if (size < 0) {
+        return size;
+    }
+    VERBOSE(tracee, 4, "%s: droid_files fd_path = %s", __PRETTY_FUNCTION__, fd_path);
+    
+    size = read_string(tracee, orig_path, peek_reg(tracee, CURRENT, path_sysarg), PATH_MAX);
+    if (size < 0)
+        return size;
+    if (size >= PATH_MAX)
+        return -ENAMETOOLONG;
+    VERBOSE(tracee, 4, "%s: droid_files orig_path = %s", __PRETTY_FUNCTION__, orig_path);
+    
+    status = translate_path(tracee, translated_path, AT_FDCWD, orig_path, true);
+    if (status < 0)
+        return status;
+    VERBOSE(tracee, 4, "%s: droid_files translated_path = %s", __PRETTY_FUNCTION__, translated_path);
+
+    common_length = find_common_suffix_len(translated_path, fd_path);
+    strncpy(check_path2, fd_path, strlen(fd_path) - common_length);
+    VERBOSE(tracee, 4, "%s: droid_files check_path2 = %s", __PRETTY_FUNCTION__, check_path2);
+
+    return 0;
+}
+
 int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     int status;
     
@@ -308,11 +356,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         } ancillary_data_buffer_2;
         read_data(tracee, &ancillary_data_buffer_2, (word_t)message_header_2.msg_control, sizeof(ancillary_data_buffer_2));
 
-        size = readlink_proc_pid_fd(tracee->pid, ancillary_data_buffer_2.fd[0], check_path2);
-	if (size < 0) {
-            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
-            return 0;
-        }
+	update_check_path2(tracee, ancillary_data_buffer_2.fd[0], path_sysarg); 
 
         tracee->word_store[2] = ancillary_data_buffer_2.fd[0];
         register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
