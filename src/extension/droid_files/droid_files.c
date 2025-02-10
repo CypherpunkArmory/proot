@@ -104,7 +104,7 @@ int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
     char translated_path[PATH_MAX];
     int common_length;
 
-    size = readlink_proc_pid_fd(tracee->pid, ancillary_data_buffer_2.fd[0], fd_path);
+    size = readlink_proc_pid_fd(tracee->pid, fd, fd_path);
     if (size < 0) {
         return size;
     }
