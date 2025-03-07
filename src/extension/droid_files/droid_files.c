@@ -276,7 +276,7 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
     case PR_read:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
         if ((size_t)result != sizeof(word_t)) {
-            VERBOSE(tracee, 4, "%s: Failed to read UNIX socket", __PRETTY_FUNCTION__);
+            VERBOSE(tracee, 4, "%s: Failed to read UNIX socket errno = %d, strerror = %s", __PRETTY_FUNCTION__, -result, strerror(-result));
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
