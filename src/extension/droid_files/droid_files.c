@@ -159,7 +159,7 @@ int handle_open_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
 
     set_sysnum(tracee, PR_socket);
     poke_reg(tracee, SYSARG_1, AF_UNIX);
-    poke_reg(tracee, SYSARG_2, SOCK_STREAM);
+    poke_reg(tracee, SYSARG_2, SOCK_STREAM | SOCK_NONBLOCK);
     poke_reg(tracee, SYSARG_3, 0);
 
     //Allocate memory we are going to need later
@@ -275,6 +275,12 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         return 0;
     case PR_read:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+
+        if (result == -EAGAIN) {
+            VERBOSE(tracee, 4, "%s: Read issued EAGAIN, try again", __PRETTY_FUNCTION__);
+            register_chained_syscall(tracee, PR_read, tracee->word_store[1], tracee->word_store[8], sizeof(word_t), 0, 0, 0);
+            return 0;
+	}
         if ((size_t)result != sizeof(word_t)) {
             VERBOSE(tracee, 4, "%s: Failed to read UNIX socket errno = %d, strerror = %s", __PRETTY_FUNCTION__, -result, strerror(-result));
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
