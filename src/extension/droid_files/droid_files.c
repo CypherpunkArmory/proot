@@ -276,13 +276,13 @@ int handle_open_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
     case PR_read:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
 
-        if (result == -EAGAIN) {
+        if ((int)result == -EAGAIN) {
             VERBOSE(tracee, 4, "%s: Read issued EAGAIN, try again", __PRETTY_FUNCTION__);
             register_chained_syscall(tracee, PR_read, tracee->word_store[1], tracee->word_store[8], sizeof(word_t), 0, 0, 0);
             return 0;
 	}
         if ((size_t)result != sizeof(word_t)) {
-            VERBOSE(tracee, 4, "%s: Failed to read UNIX socket errno = %d, strerror = %s", __PRETTY_FUNCTION__, -result, strerror(-result));
+            VERBOSE(tracee, 4, "%s: Failed to read UNIX socket errno = %d, strerror = %s", __PRETTY_FUNCTION__, ((int)result)*-1, strerror(-result));
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
