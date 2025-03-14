@@ -107,6 +107,8 @@ int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
     if (size < 0) {
         return size;
     }
+    if (fd_path[size-1] == '/')
+        fd_path[size-1] = '\0';
     VERBOSE(tracee, 4, "%s: droid_files fd_path = %s", __PRETTY_FUNCTION__, fd_path);
     
     size = read_string(tracee, orig_path, peek_reg(tracee, ORIGINAL, path_sysarg), PATH_MAX);
@@ -114,6 +116,8 @@ int update_check_path2(Tracee *tracee, int fd, Reg path_sysarg) {
         return size;
     if (size >= PATH_MAX)
         return -ENAMETOOLONG;
+    if (orig_path[size-1] == '/')
+        orig_path[size-1] = '\0';
     VERBOSE(tracee, 4, "%s: droid_files orig_path = %s", __PRETTY_FUNCTION__, orig_path);
     
     common_length = find_common_suffix_len(orig_path, fd_path);
