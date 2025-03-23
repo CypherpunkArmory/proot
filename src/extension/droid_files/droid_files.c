@@ -19,6 +19,8 @@
 
 //these paths will be used to determine if this system call should be acted upon
 #define DROID_FILES_CHECKPATH "/sdcard/"
+#define DROID_FILES_DOWNLOADS "/sdcard/Download/"
+#define DROID_FILES_ANDROID "/sdcard/Android/"
 //this is a path we will get from an fd passed from the droid_files server
 char check_path2[PATH_MAX];
 
@@ -47,7 +49,11 @@ struct linux_dirent64 {
 int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     int size, status;
     char check_path[] = DROID_FILES_CHECKPATH;
+    char check_downloads_path[] = DROID_FILES_DOWNLOADS;
+    char check_android_path[] = DROID_FILES_ANDROID;
     char translated_check_path[PATH_MAX];
+    char translated_downloads_path[PATH_MAX];
+    char translated_android_path[PATH_MAX];
     char orig_path[PATH_MAX];
     
     if (path_sysarg != IGNORE_SYSARG) {
@@ -66,6 +72,26 @@ int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
         return status;
 
     VERBOSE(tracee, 4, "%s: droid_files translated_check_path = %s", __PRETTY_FUNCTION__, translated_check_path);
+    
+    status = translate_path(tracee, translated_downloads_path, AT_FDCWD, check_downloads_path, true);
+    if (status < 0)
+        return status;
+
+    VERBOSE(tracee, 4, "%s: droid_files translated_downloads_path = %s", __PRETTY_FUNCTION__, translated_downloads_path);
+    
+    status = translate_path(tracee, translated_android_path, AT_FDCWD, check_android_path, true);
+    if (status < 0)
+        return status;
+
+    VERBOSE(tracee, 4, "%s: droid_files translated_android_path = %s", __PRETTY_FUNCTION__, translated_android_path);
+
+    if (strlen(orig_path) >= strlen(translated_android_path))
+        if (strncmp(orig_path, translated_android_path, strlen(translated_android_path)) == 0)
+            return 0;
+
+    if (strlen(orig_path) == strlen(translated_downloads_path))
+        if (strncmp(orig_path, translated_downloads_path, strlen(translated_downloads_path)) == 0)
+            return 0;
 
     if (strlen(orig_path) > strlen(translated_check_path))
         if (strncmp(orig_path, translated_check_path, strlen(translated_check_path)) == 0)
