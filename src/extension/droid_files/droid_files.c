@@ -66,22 +66,30 @@ int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
         return size;
     if (size >= PATH_MAX)
         return -ENAMETOOLONG;
+    if (orig_path[strlen(orig_path)-1] == '/')
+        orig_path[strlen(orig_path)-1] = '\0';
     
     status = translate_path(tracee, translated_check_path, AT_FDCWD, check_path, true);
     if (status < 0)
         return status;
+    if (translated_check_path[strlen(translated_check_path)-1] == '/')
+        translated_check_path[strlen(translated_check_path)-1] = '\0';
 
     VERBOSE(tracee, 4, "%s: droid_files translated_check_path = %s", __PRETTY_FUNCTION__, translated_check_path);
     
     status = translate_path(tracee, translated_downloads_path, AT_FDCWD, check_downloads_path, true);
     if (status < 0)
         return status;
+    if (translated_downloads_path[strlen(translated_downloads_path)-1] == '/')
+        translated_downloads_path[strlen(translated_downloads_path)-1] = '\0';
 
     VERBOSE(tracee, 4, "%s: droid_files translated_downloads_path = %s", __PRETTY_FUNCTION__, translated_downloads_path);
     
     status = translate_path(tracee, translated_android_path, AT_FDCWD, check_android_path, true);
     if (status < 0)
         return status;
+    if (translated_android_path[strlen(translated_android_path)-1] == '/')
+        translated_android_path[strlen(translated_android_path)-1] = '\0';
 
     VERBOSE(tracee, 4, "%s: droid_files translated_android_path = %s", __PRETTY_FUNCTION__, translated_android_path);
 
