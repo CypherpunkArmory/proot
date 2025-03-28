@@ -103,28 +103,33 @@ int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
         if (strncmp(orig_path, translated_downloads_path, strlen(translated_downloads_path)) == 0)
             return 0;
 
-    if (strlen(orig_path) > strlen(translated_check_path))
-        if (strncmp(orig_path, translated_check_path, strlen(translated_check_path)) == 0)
+    if (strlen(orig_path) > strlen(translated_check_path) + 1) {
+        if (strncmp(orig_path, translated_check_path, strlen(translated_check_path)) == 0) {
             if ((orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat)) {
-                if (strchr(orig_path + strlen(translated_check_path),'/') != NULL) {
+                if (strchr(orig_path + strlen(translated_check_path) + 2,'/') != NULL) {
                     return 1;
                 }
 	    } else {
                 return 1;
             }
+        }
+    }
 
     VERBOSE(tracee, 4, "%s: droid_files check_path2 = %s", __PRETTY_FUNCTION__, check_path2);
 
-    if (strlen(check_path2) > 1)
-        if (strlen(orig_path) > strlen(check_path2))
-            if (strncmp(orig_path, check_path2, strlen(check_path2)) == 0)
+    if (strlen(check_path2) > 1) {
+        if (strlen(orig_path) > strlen(check_path2) + 1) {
+            if (strncmp(orig_path, check_path2, strlen(check_path2)) == 0) {
                 if ((orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat)) {
-                    if (strchr(orig_path + strlen(check_path2),'/') != NULL) {
+                    if (strchr(orig_path + strlen(check_path2) + 2,'/') != NULL) {
                         return 1;
                     }
 		} else {
                     return 1;
                 }
+            }
+        }
+    }
 
     return 0;
 }
@@ -454,7 +459,7 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             if (curr_status != 0)
                 return -curr_status;
             tracee->word_store[9] = (word_t)1;
-            register_chained_syscall(tracee, PR_fstat, tracee->word_store[2], stat_sysarg, 0, 0, 0, 0);
+            register_chained_syscall(tracee, PR_fstat, tracee->word_store[2], peek_reg(tracee, ORIGINAL, stat_sysarg), 0, 0, 0, 0);
             return 0;
         }
         poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
