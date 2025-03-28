@@ -55,6 +55,8 @@ int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
     char translated_downloads_path[PATH_MAX];
     char translated_android_path[PATH_MAX];
     char orig_path[PATH_MAX];
+    word_t orig_sysnum;
+    orig_sysnum = get_sysnum(tracee, ORIGINAL);
     
     if (path_sysarg != IGNORE_SYSARG) {
         size = read_string(tracee, orig_path, peek_reg(tracee, CURRENT, path_sysarg), PATH_MAX);
@@ -103,14 +105,22 @@ int check_paths(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
 
     if (strlen(orig_path) > strlen(translated_check_path))
         if (strncmp(orig_path, translated_check_path, strlen(translated_check_path)) == 0)
-            return 1;
+            if ((orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat))
+                if (strchr(orig_path + strlen(translated_check_path),'/') != NULL)
+                    return 1;
+             else
+                return 1;
 
     VERBOSE(tracee, 4, "%s: droid_files check_path2 = %s", __PRETTY_FUNCTION__, check_path2);
 
     if (strlen(check_path2) > 1)
         if (strlen(orig_path) > strlen(check_path2))
             if (strncmp(orig_path, check_path2, strlen(check_path2)) == 0)
-                return 1;
+                if ((orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat))
+                    if (strchr(orig_path + strlen(check_path2),'/') != NULL)
+                        return 1;
+                 else
+                    return 1;
 
     return 0;
 }
