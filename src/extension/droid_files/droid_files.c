@@ -448,6 +448,10 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
         return 0;
     case PR_fstat:
+        struct stat my_stat;
+        read_data(tracee, &my_stat, peek_reg(tracee, ORIGINAL, stat_sysarg), sizeof(struct stat));
+	my_stat.st_ino = 1;
+        write_data(tracee, peek_reg(tracee, ORIGINAL, stat_sysarg), &my_stat, sizeof(struct stat));
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
         register_chained_syscall(tracee, PR_close, tracee->word_store[2], 0, 0, 0, 0, 0);
         tracee->word_store[2] = result;
