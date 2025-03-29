@@ -448,7 +448,7 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         tracee->word_store[2] = ancillary_data_buffer_2.fd[0];
         register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
         return 0;
-    case PR_fstat:
+    case PR_fstat: {
         struct stat my_stat;
         read_data(tracee, &my_stat, peek_reg(tracee, ORIGINAL, stat_sysarg), sizeof(struct stat));
 	my_stat.st_ino = 1;
@@ -457,6 +457,7 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         register_chained_syscall(tracee, PR_close, tracee->word_store[2], 0, 0, 0, 0, 0);
         tracee->word_store[2] = result;
         return 0;
+    }
     case PR_close: {
         word_t curr_status = 1;
         result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
