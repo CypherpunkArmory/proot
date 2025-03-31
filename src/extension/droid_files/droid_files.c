@@ -259,11 +259,12 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
     sysnum = get_sysnum(tracee, CURRENT);
     switch (sysnum) {
     case PR_lseek:
-        tracee->word_store[2] = peek_reg(tracee, CURRENT, SYSARG_RESULT);
-        set_sysnum(tracee, PR_socket);
-        poke_reg(tracee, SYSARG_1, AF_UNIX);
-        poke_reg(tracee, SYSARG_2, SOCK_STREAM | SOCK_NONBLOCK);
-        poke_reg(tracee, SYSARG_3, 0);
+        if (tracee->word_store[9] == (word_t)1) {
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+        } else {
+            tracee->word_store[2] = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+            register_chained_syscall(tracee, PR_socket, AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, 0, 0, 0);
+        }
         return 0;
     case PR_socket:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
@@ -416,7 +417,9 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             close(dirents_fd);
             write_data(tracee, peek_reg(tracee, ORIGINAL, SYSARG_2), dirents_buf, size);
             tracee->word_store[2] = (word_t)size;
-            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+
+            tracee->word_store[9] = (word_t)1;
+            register_chained_syscall(tracee, PR_lseek, 1, SEEK_CUR, 0, 0, 0, 0);
             return 0;
         }
  
