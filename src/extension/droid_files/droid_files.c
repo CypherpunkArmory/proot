@@ -419,7 +419,7 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             tracee->word_store[2] = (word_t)size;
 
             tracee->word_store[9] = (word_t)1;
-            register_chained_syscall(tracee, PR_lseek, 1, SEEK_CUR, 0, 0, 0, 0);
+            register_chained_syscall(tracee, PR_lseek, peek_reg(tracee, ORIGINAL, fd_sysarg), 1, SEEK_CUR, 0, 0, 0);
             return 0;
         }
  
