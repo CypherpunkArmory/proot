@@ -207,18 +207,28 @@ void modify_path(Tracee *tracee, char *path) {
 }
 
 int handle_path_sysenter_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg) {
+    word_t orig_sysnum;
     int status;
     
+    orig_sysnum = get_sysnum(tracee, ORIGINAL);
+
     status = check_paths(tracee, fd_sysarg, path_sysarg);
     if (status <= 0)
         return status;
 
     VERBOSE(tracee, 4, "%s: droid_files path match found", __PRETTY_FUNCTION__);
 
-    set_sysnum(tracee, PR_socket);
-    poke_reg(tracee, SYSARG_1, AF_UNIX);
-    poke_reg(tracee, SYSARG_2, SOCK_STREAM | SOCK_NONBLOCK);
-    poke_reg(tracee, SYSARG_3, 0);
+    if ((orig_sysnum == PR_getdents) || (orig_sysnum == PR_getdents64)) {
+       set_sysnum(tracee, PR_lseek);
+       poke_reg(tracee, SYSARG_1, peek_reg(tracee, ORIGINAL, fd_sysarg));
+       poke_reg(tracee, SYSARG_2, 0);
+       poke_reg(tracee, SYSARG_3, SEEK_CUR);
+    } else {
+       set_sysnum(tracee, PR_socket);
+       poke_reg(tracee, SYSARG_1, AF_UNIX);
+       poke_reg(tracee, SYSARG_2, SOCK_STREAM | SOCK_NONBLOCK);
+       poke_reg(tracee, SYSARG_3, 0);
+    }
 
     //Allocate memory we are going to need later
     tracee->word_store[0] = alloc_mem(tracee, sizeof(struct sockaddr_un));
@@ -248,6 +258,13 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
     orig_sysnum = get_sysnum(tracee, ORIGINAL);
     sysnum = get_sysnum(tracee, CURRENT);
     switch (sysnum) {
+    case PR_lseek:
+        tracee->word_store[2] = peek_reg(tracee, CURRENT, SYSARG_RESULT);
+        set_sysnum(tracee, PR_socket);
+        poke_reg(tracee, SYSARG_1, AF_UNIX);
+        poke_reg(tracee, SYSARG_2, SOCK_STREAM | SOCK_NONBLOCK);
+        poke_reg(tracee, SYSARG_3, 0);
+        return 0;
     case PR_socket:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
         if ((int)result < 0) {
@@ -262,9 +279,6 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         sprintf(sockaddr.sun_path, "%s", sock_path);
         write_data(tracee, tracee->word_store[0], &sockaddr, sizeof(struct sockaddr_un));
         tracee->word_store[1] = result;
-        tracee->word_store[2] = (word_t)0;
-        if ((orig_sysnum == PR_open) || (orig_sysnum == PR_openat) || (orig_sysnum == PR_creat) || (orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat))
-            tracee->word_store[2] = (word_t)-1;
         word_t init_status = 0;
         write_data(tracee, tracee->word_store[8], &init_status, sizeof(word_t));
         register_chained_syscall(tracee, PR_connect, result, tracee->word_store[0], sizeof(sockaddr), 0, 0, 0);
@@ -297,7 +311,9 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         } else if ((orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat)) {
             sock_req.sysCall = 9;
         }
-        if (orig_sysnum == PR_creat) {
+        if ((orig_sysnum == PR_getdents) || (orig_sysnum == PR_getdents64)) {
+            sock_req.sysargs[0] = tracee->word_store[2];
+	} else if (orig_sysnum == PR_creat) {
             sock_req.sysargs[0] = O_CREAT | O_WRONLY | O_TRUNC;
         } else if (flags_sysarg != IGNORE_SYSARG) {
             sock_req.sysargs[0] = peek_reg(tracee, ORIGINAL, flags_sysarg);
@@ -324,6 +340,11 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         strcpy(sock_req.path, path);
         write_data(tracee, tracee->word_store[3], &sock_req, sizeof(sock_req_t));
         register_chained_syscall(tracee, PR_write, tracee->word_store[1], tracee->word_store[3], sizeof(sock_req), 0, 0, 0);
+
+        tracee->word_store[2] = (word_t)0;
+        if ((orig_sysnum == PR_open) || (orig_sysnum == PR_openat) || (orig_sysnum == PR_creat) || (orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat))
+            tracee->word_store[2] = (word_t)-1;
+
         return 0;
     case PR_write:
         result = peek_reg(tracee, CURRENT, SYSARG_RESULT);
