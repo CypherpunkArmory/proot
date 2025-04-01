@@ -311,6 +311,8 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             sock_req.sysCall = 8;
         } else if ((orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat)) {
             sock_req.sysCall = 9;
+	} else if ((orig_sysnum == PR_faccessat) || (orig_sysnum == PR_faccessat2)) {
+            sock_req.sysCall = 10;
         }
         if ((orig_sysnum == PR_getdents) || (orig_sysnum == PR_getdents64)) {
             sock_req.sysargs[0] = tracee->word_store[2];
