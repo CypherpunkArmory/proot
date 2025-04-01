@@ -553,7 +553,6 @@ static int handle_sysexit_end(Tracee *tracee)
 
     sysnum = get_sysnum(tracee, ORIGINAL);
     switch (sysnum) {
-int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg flags_sysarg, Reg mode_sysarg, Reg stat_sysarg) {
     case PR_fstatat64:
     case PR_newfstatat:
         return handle_path_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_2, IGNORE_SYSARG, IGNORE_SYSARG, SYSARG_3);
