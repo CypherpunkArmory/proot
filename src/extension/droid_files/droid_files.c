@@ -392,6 +392,10 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
             return 0;
         }
+        if ((orig_sysnum == PR_faccessat) || (orig_sysnum == PR_faccessat2)) {
+            register_chained_syscall(tracee, PR_close, tracee->word_store[1], 0, 0, 0, 0, 0);
+            return 0;
+        }
 
         if ((orig_sysnum == PR_getdents) || (orig_sysnum == PR_getdents64)) {
             char dirents_path[PATH_MAX];
@@ -493,10 +497,18 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
         if (curr_status != 0)
             return -curr_status;
-        if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat))
+        if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
+            poke_reg(tracee, SYSARG_RESULT, curr_status);
             return 0;
-        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat))
+        }
+        if ((orig_sysnum == PR_unlink) || (orig_sysnum == PR_unlinkat)) {
+            poke_reg(tracee, SYSARG_RESULT, curr_status);
             return 0;
+        }
+        if ((orig_sysnum == PR_faccessat) || (orig_sysnum == PR_faccessat2)) {
+            poke_reg(tracee, SYSARG_RESULT, curr_status);
+            return 0;
+        }
         if ((int)tracee->word_store[2] == -1)
             return -EINVAL;
     }
@@ -506,7 +518,6 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
 
     return 0;
 }
-
 
 static int handle_sysenter_end(Tracee *tracee)
 {
@@ -519,6 +530,8 @@ static int handle_sysenter_end(Tracee *tracee)
     case PR_openat:
     case PR_fstatat64:
     case PR_newfstatat:
+    case PR_faccessat:
+    case PR_faccessat2:
         return handle_path_sysenter_end(tracee, IGNORE_SYSARG, SYSARG_2);
     case PR_unlink:
     case PR_mkdir:
@@ -540,10 +553,13 @@ static int handle_sysexit_end(Tracee *tracee)
 
     sysnum = get_sysnum(tracee, ORIGINAL);
     switch (sysnum) {
+int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg flags_sysarg, Reg mode_sysarg, Reg stat_sysarg) {
     case PR_fstatat64:
     case PR_newfstatat:
         return handle_path_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_2, IGNORE_SYSARG, IGNORE_SYSARG, SYSARG_3);
     case PR_openat:
+    case PR_faccessat:
+    case PR_faccessat2:
         return handle_path_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_2, SYSARG_3, SYSARG_4, IGNORE_SYSARG);
     case PR_open:
         return handle_path_sysexit_end(tracee, IGNORE_SYSARG, SYSARG_1, SYSARG_2, SYSARG_3, IGNORE_SYSARG);
@@ -587,6 +603,8 @@ int droid_files_callback(Extension *extension, ExtensionEvent event,
             { PR_getdents64, FILTER_SYSEXIT },
 	    { PR_newfstatat, FILTER_SYSEXIT },
 	    { PR_fstatat64,  FILTER_SYSEXIT },
+	    { PR_faccessat,  FILTER_SYSEXIT },
+	    { PR_faccessat2, FILTER_SYSEXIT },
             //{ PR_rename,    FILTER_SYSEXIT }, TODO: need to handle these, but need to figure out when it spans directories possibly inside and outside of the rootfs
             //{ PR_renameat,  FILTER_SYSEXIT },
             //{ PR_renameat2, FILTER_SYSEXIT },
