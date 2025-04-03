@@ -45,6 +45,7 @@
 #include "path/path.h"
 #include "path/canon.h"
 #include "arch.h"
+#include "cli/note.h"
 
 /**
  * Translate @path and put the result in the @tracee's memory address
@@ -622,7 +623,13 @@ int translate_syscall_enter(Tracee *tracee)
 
 
 end:
+	if (status < 0) {
+		VERBOSE(tracee, 4, "%s: status = %d before notify_extensions", __PRETTY_FUNCTION__, status);
+	}
 	status2 = notify_extensions(tracee, SYSCALL_ENTER_END, status, 0);
+	if (status2 < 0) {
+		VERBOSE(tracee, 4, "%s: status2 = %d after notify_extensions", __PRETTY_FUNCTION__, status2);
+	}
 	if (status2 < 0)
 		status = status2;
 
