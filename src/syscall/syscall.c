@@ -138,17 +138,11 @@ void translate_syscall(Tracee *tracee)
 		if (tracee->chain.syscalls == NULL) {
 			save_current_regs(tracee, ORIGINAL);
 			status = translate_syscall_enter(tracee);
-			if (status < 0) {
-				VERBOSE(tracee, 4, "%s: status = %d after translate_syscall_enter", __PRETTY_FUNCTION__, status);
-			}
 			save_current_regs(tracee, MODIFIED);
 		}
 		else {
 			if (tracee->chain.sysnum_workaround_state != SYSNUM_WORKAROUND_PROCESS_REPLACED_CALL) {
 				status = notify_extensions(tracee, SYSCALL_CHAINED_ENTER, 0, 0);
-			}
-			if (status < 0) {
-				VERBOSE(tracee, 4, "%s: status = %d after notify_extensions", __PRETTY_FUNCTION__, status);
 			}
 			tracee->restart_how = PTRACE_SYSCALL;
 		}
@@ -157,7 +151,6 @@ void translate_syscall(Tracee *tracee)
 		 * avoid the actual syscall if an error was reported
 		 * by the translation/extension. */
 		if (status < 0) {
-			VERBOSE(tracee, 4, "%s: status = %d, setting sysnum to PR_void", __PRETTY_FUNCTION__, status);
 			set_sysnum(tracee, PR_void);
 			poke_reg(tracee, SYSARG_RESULT, (word_t) status);
 			tracee->status = status;

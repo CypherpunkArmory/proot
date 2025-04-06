@@ -717,10 +717,8 @@ int link2symlink_callback(Extension *extension, ExtensionEvent event,
 			 */
 
 			status = decrement_link_count(tracee, SYSARG_2);
-			if (status < 0) {
-				VERBOSE(tracee, 1, "unlinkat link2symlink status = %d", status);
+			if (status < 0)
 				return status;
-			}
 
 			break;
 
