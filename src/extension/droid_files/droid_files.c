@@ -490,15 +490,19 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
         word_t curr_status = 1;
         result = read_data(tracee, &curr_status, tracee->word_store[8], sizeof(word_t));
         if (((orig_sysnum == PR_fstatat64) || (orig_sysnum == PR_newfstatat)) && (tracee->word_store[9] == (word_t)0)) {
-            if (curr_status != 0)
+            if (curr_status != 0) {
+                poke_reg(tracee, SYSARG_RESULT, -curr_status);
                 return -curr_status;
+            }
             tracee->word_store[9] = (word_t)1;
             register_chained_syscall(tracee, PR_fstat, tracee->word_store[2], peek_reg(tracee, ORIGINAL, stat_sysarg), 0, 0, 0, 0);
             return 0;
         }
         poke_reg(tracee, SYSARG_RESULT, tracee->word_store[2]);
-        if (curr_status != 0)
+        if (curr_status != 0) {
+            poke_reg(tracee, SYSARG_RESULT, -curr_status);
             return -curr_status;
+	}
         if ((orig_sysnum == PR_mkdir) || (orig_sysnum == PR_mkdirat)) {
             poke_reg(tracee, SYSARG_RESULT, curr_status);
             return 0;
@@ -511,8 +515,10 @@ int handle_path_sysexit_end(Tracee *tracee, Reg fd_sysarg, Reg path_sysarg, Reg 
             poke_reg(tracee, SYSARG_RESULT, curr_status);
             return 0;
         }
-        if ((int)tracee->word_store[2] == -1)
+        if ((int)tracee->word_store[2] == -1) {
+            poke_reg(tracee, SYSARG_RESULT, -EINVAL);
             return -EINVAL;
+        }
     }
     default:
         return 0;
