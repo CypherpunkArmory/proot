@@ -521,7 +521,7 @@ static int handle_perm_err_exit_end(Tracee *tracee, Config *config) {
 
 	/* Force success if the tracee was supposed to have
 	 * the capability.  */
-	if (config->euid == 0) /* TODO: || HAS_CAP(...) */
+	//if (config->euid == 0) /* TODO: || HAS_CAP(...) */
 		poke_reg(tracee, SYSARG_RESULT, 0);
 
 	return 0;
