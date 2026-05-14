@@ -30,7 +30,8 @@ static int handle_seccomp_event_common(Tracee *tracee);
 void restart_syscall_after_seccomp(Tracee* tracee) {
 	word_t instr_pointer;
 
-	/* Enable restore regs at end of replaced call.  */
+	/* Enable restore regs at end of replaced call.
+	 * This also defers delivering of signals until restarted syscall finishes.  */
 	tracee->restore_original_regs_after_seccomp_event = true;
 	tracee->restart_how = PTRACE_SYSCALL;
 
@@ -408,60 +409,6 @@ static int handle_seccomp_event_common(Tracee *tracee)
 		restart_syscall_after_seccomp(tracee);
 		break;
 
-	case PR_fork:
-		set_sysnum(tracee, PR_clone);
-		poke_reg(tracee, SYSARG_1, SIGCHLD);
-		poke_reg(tracee, SYSARG_2, 0);
-		poke_reg(tracee, SYSARG_3, 0);
-		poke_reg(tracee, SYSARG_4, 0);
-		poke_reg(tracee, SYSARG_5, 0);
-		restart_syscall_after_seccomp(tracee);
-		break;
-
-	case PR_alarm:
-	{
-			unsigned int seconds;
-			struct itimerval old, new;
-			word_t old_arg = 0;
-			word_t new_arg = 0;
-
-			seconds = peek_reg(tracee, CURRENT, SYSARG_1);
-
-			old.it_interval.tv_usec = 0;
-			old.it_interval.tv_sec = 0;
-			old.it_value.tv_usec = 0;
-			old.it_value.tv_sec = 0;
-
-			old_arg = alloc_mem(tracee, sizeof(old));
-			if(write_data(tracee, old_arg, &old, sizeof(old))) {
-					set_result_after_seccomp(tracee, -EFAULT);
-					break;
-			}
-
-			new.it_interval.tv_usec = 0;
-			new.it_interval.tv_sec = 0;
-			new.it_value.tv_usec = 0;
-			new.it_value.tv_sec = (long int) seconds;
-
-			if (is_32on64_mode(tracee)) {
-				((uint32_t*) &new)[2] = seconds;
-				new.it_value.tv_sec = 0;
-			}
-
-			new_arg = alloc_mem(tracee, sizeof(new));
-			if(write_data(tracee, new_arg, &new, sizeof(new))) {
-					set_result_after_seccomp(tracee, -EFAULT);
-					break;
-			}
-
-			set_sysnum(tracee, PR_setitimer);
-			poke_reg(tracee, SYSARG_1, ITIMER_REAL);
-			poke_reg(tracee, SYSARG_2, new_arg);
-			poke_reg(tracee, SYSARG_3, old_arg);
-			restart_syscall_after_seccomp(tracee);
-			break;
-	}
-
 	case PR_access:
 		set_sysnum(tracee, PR_faccessat);
 		poke_reg(tracee, SYSARG_4, 0);
@@ -540,6 +487,15 @@ static int handle_seccomp_event_common(Tracee *tracee)
 		poke_reg(tracee, SYSARG_3, timespec_arg);
 		poke_reg(tracee, SYSARG_4, 0);
 		poke_reg(tracee, SYSARG_5, 0);
+		restart_syscall_after_seccomp(tracee);
+		break;
+	}
+
+	case PR_epoll_wait:
+	{
+		set_sysnum(tracee, PR_epoll_pwait);
+		poke_reg(tracee, SYSARG_5, 0);
+		poke_reg(tracee, SYSARG_6, 0);
 		restart_syscall_after_seccomp(tracee);
 		break;
 	}

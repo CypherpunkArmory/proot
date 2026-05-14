@@ -35,6 +35,7 @@
 
 #include "tracee/tracee.h"
 #include "tracee/reg.h"
+#include "tracee/mem.h"
 #include "path/binding.h"
 #include "syscall/sysnum.h"
 #include "tracee/event.h"
@@ -193,6 +194,7 @@ Tracee *new_dummy_tracee(TALLOC_CTX *context)
 	 * name-space and heap.  */
 	tracee->fs = talloc_zero(tracee, FileSystemNameSpace);
 	tracee->heap = talloc_zero(tracee, Heap);
+	tracee->auxv_fd = -1;
 	if (tracee->fs == NULL || tracee->heap == NULL)
 		goto no_mem;
 
@@ -398,6 +400,10 @@ int new_child(Tracee *parent, word_t clone_flags)
 	status = fetch_regs(parent);
 	if (status >= 0 && get_sysnum(parent, CURRENT) == PR_clone)
 		clone_flags = peek_reg(parent, CURRENT, SYSARG_1);
+        else if (status >= 0 && get_sysnum(parent, CURRENT) == PR_clone3)
+                // Look at the first word of the clone_args structure, which
+                // contains the usual clone flags.
+                clone_flags = peek_word(parent, peek_reg(parent, CURRENT, SYSARG_1));
 
 	/* Get the pid of the parent's new child.  */
 	status = ptrace(PTRACE_GETEVENTMSG, parent->pid, NULL, &pid);
@@ -427,6 +433,8 @@ int new_child(Tracee *parent, word_t clone_flags)
 	child->verbose = parent->verbose;
 	child->seccomp = parent->seccomp;
 	child->sysexit_pending = parent->sysexit_pending;
+	child->execfn_addr = parent->execfn_addr;
+	child->auxv_fd = parent->auxv_fd;
 #ifdef HAS_POKEDATA_WORKAROUND
 	child->pokedata_workaround_stub_addr = parent->pokedata_workaround_stub_addr;
 #endif

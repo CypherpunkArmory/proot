@@ -30,6 +30,7 @@
 #include <sys/prctl.h>   /* PR_SET_DUMPABLE */
 #include <termios.h>     /* TCSETS, TCSANOW */
 
+#include "cli/note.h"
 #include "syscall/syscall.h"
 #include "syscall/sysnum.h"
 #include "syscall/socket.h"
@@ -124,6 +125,20 @@ int translate_syscall_enter(Tracee *tracee)
 		break;
 
 	case PR_execve:
+		status = translate_execve_enter(tracee);
+		break;
+
+	case PR_execveat:
+		if ((int) peek_reg(tracee, CURRENT, SYSARG_1) == AT_FDCWD) {
+			set_sysnum(tracee, PR_execve);
+			poke_reg(tracee, SYSARG_1, peek_reg(tracee, CURRENT, SYSARG_2));
+			poke_reg(tracee, SYSARG_2, peek_reg(tracee, CURRENT, SYSARG_3));
+			poke_reg(tracee, SYSARG_3, peek_reg(tracee, CURRENT, SYSARG_4));
+		} else {
+			note(tracee, ERROR, SYSTEM, "execveat() with non-AT_FDCWD fd is not currently supported");
+			status = -ENOSYS;
+			break;
+		}
 		status = translate_execve_enter(tracee);
 		break;
 
@@ -386,6 +401,13 @@ int translate_syscall_enter(Tracee *tracee)
 	case PR_open:
 		flags = peek_reg(tracee, CURRENT, SYSARG_2);
 
+		if (tracee->execfn_addr != 0
+		    && read_string(tracee, path, peek_reg(tracee, CURRENT, SYSARG_1), PATH_MAX) > 0
+		    && strcmp(path, "/proc/self/auxv") == 0) {
+			tracee->sysexit_pending = true;
+			tracee->restart_how = PTRACE_SYSCALL;
+		}
+
 		if (   ((flags & O_NOFOLLOW) != 0)
 		    || ((flags & O_EXCL) != 0 && (flags & O_CREAT) != 0))
 			status = translate_sysarg(tracee, SYSARG_1, SYMLINK);
@@ -508,6 +530,11 @@ int translate_syscall_enter(Tracee *tracee)
 		if (status < 0)
 			break;
 
+		if (tracee->execfn_addr != 0 && strcmp(path, "/proc/self/auxv") == 0) {
+			tracee->sysexit_pending = true;
+			tracee->restart_how = PTRACE_SYSCALL;
+		}
+
 		if (   ((flags & O_NOFOLLOW) != 0)
 			|| ((flags & O_EXCL) != 0 && (flags & O_CREAT) != 0))
 			status = translate_path2(tracee, dirfd, path, SYSARG_2, SYMLINK);
@@ -593,6 +620,14 @@ int translate_syscall_enter(Tracee *tracee)
 			set_sysnum(tracee, PR_void);
 			status = 0;
 		}
+		/* Need sysexit to patch AT_EXECFN in the returned buffer. */
+#ifndef PR_GET_AUXV
+#define PR_GET_AUXV 0x41555856
+#endif
+		if (peek_reg(tracee, CURRENT, SYSARG_1) == PR_GET_AUXV) {
+			tracee->sysexit_pending = true;
+			tracee->restart_how = PTRACE_SYSCALL;
+		}
 		break;
 
 #ifdef __ANDROID__
@@ -601,6 +636,23 @@ int translate_syscall_enter(Tracee *tracee)
 		if (peek_reg(tracee, CURRENT, SYSARG_2) == TCSETS + 2 /* + TCSAFLUSH */) {
 			poke_reg(tracee, SYSARG_2, TCSETS + TCSANOW);
 		}
+
+		if (peek_reg(tracee, CURRENT, SYSARG_2) == TCGETS2) {
+			poke_reg(tracee, SYSARG_2, TCGETS);
+		}
+
+		if (peek_reg(tracee, CURRENT, SYSARG_2) == TCSETS2) {
+			poke_reg(tracee, SYSARG_2, TCSETS);
+		}
+
+		if (peek_reg(tracee, CURRENT, SYSARG_2) == TCSETSW2) {
+			poke_reg(tracee, SYSARG_2, TCSETSW);
+		}
+
+		if (peek_reg(tracee, CURRENT, SYSARG_2) == TCSETSF2) {
+			poke_reg(tracee, SYSARG_2, TCSETSF);
+		}
+
 		break;
 #endif
 	
@@ -616,8 +668,30 @@ int translate_syscall_enter(Tracee *tracee)
 			if (0 == strncmp(memfd_name, "JITCode:", 8)) {
 				status = -EACCES;
 			}
+			/* php8.3 attempts using memfd as lock through fcntl(F_SETLKW),
+			 * which is not allowed on Android,
+			 * deny memfd_create() call and let php fall back to open(O_TMPFILE).
+			 * https://github.com/php/php-src/blob/26c432d850c153aaf79a1b24e4753bc0533e02b0/ext/opcache/zend_shared_alloc.c#L91
+			 */
+			if (0 == strcmp(memfd_name, "opcache_lock")) {
+				status = -EACCES;
+			}
+			/* apk-tools v3 use memfd_create + execveat, which is not supported under PRoot
+			 * https://github.com/termux/proot-distro/issues/595#issuecomment-3705344471
+			 * https://git.alpinelinux.org/apk-tools/tree/src/package.c?h=v3.0.3#n737
+			 */
+			if (0 == strncmp(memfd_name, "lib/apk/exec/", 13)) {
+				status = -EACCES;
+			}
 			break;
 		}
+	case PR_close:
+		/* Stop tracking auxv_fd once the tracee closes it. */
+		if (tracee->auxv_fd >= 0
+		    && (int) peek_reg(tracee, CURRENT, SYSARG_1) == tracee->auxv_fd)
+			tracee->auxv_fd = -1;
+		break;
+
 	}
 
 
