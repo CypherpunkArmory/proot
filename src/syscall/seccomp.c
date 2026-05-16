@@ -340,13 +340,11 @@ static FilteredSysnum proot_sysnums[] = {
 	{ PR_chown,		0 },
 	{ PR_chown32,		0 },
 	{ PR_chroot,		0 },
-	{ PR_close,		0 },
 	{ PR_connect,		0 },
 	{ PR_creat,		0 },
 	{ PR_execve,		FILTER_SYSEXIT },
-	{ PR_execveat,		FILTER_SYSEXIT },
 	{ PR_faccessat,		0 },
-	{ PR_faccessat2,	FILTER_SYSEXIT },
+	{ PR_faccessat2,	0 },
 	{ PR_fchdir,		FILTER_SYSEXIT },
 	{ PR_fchmodat,		0 },
 	{ PR_fchownat,		0 },
@@ -358,7 +356,7 @@ static FilteredSysnum proot_sysnums[] = {
 	{ PR_getxattr,		0 },
 	{ PR_inotify_add_watch,	0 },
 #ifdef __ANDROID__
-	{ PR_ioctl,		FILTER_SYSEXIT },
+	{ PR_ioctl,		0 },
 #endif
 	{ PR_lchown,		0 },
 	{ PR_lchown32,		0 },

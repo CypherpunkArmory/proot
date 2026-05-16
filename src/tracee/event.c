@@ -507,7 +507,7 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 
 					/* Redeliver signal suppressed during
 					 * syscall chain once it's finished.  */
-					if (tracee->chain.suppressed_signal && tracee->chain.syscalls == NULL && !tracee->restore_original_regs_after_seccomp_event) {
+					if (tracee->chain.suppressed_signal && tracee->chain.syscalls == NULL) {
 						signal = tracee->chain.suppressed_signal;
 						tracee->chain.suppressed_signal = 0;
 						VERBOSE(tracee, 6, "vpid %" PRIu64 ": redelivering suppressed signal %d", tracee->vpid, signal);
@@ -596,11 +596,6 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 			tracee->restart_how = PTRACE_CONT;
 			translate_syscall(tracee);
 
-			/* Sysenter handler may have requested sysexit
-			 * interception by setting sysexit_pending.  */
-			if (tracee->sysexit_pending)
-				tracee->restart_how = PTRACE_SYSCALL;
-
 			/* This syscall has disabled seccomp, so move
 			 * the ptrace flow back to the common path to
 			 * ensure its sysexit will be handled.  */
@@ -676,7 +671,7 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 		default:
 			/* Deliver this signal as-is,
 			 * unless we're chaining syscall.  */
-			if (tracee->chain.syscalls != NULL || tracee->restore_original_regs_after_seccomp_event) {
+			if (tracee->chain.syscalls != NULL) {
 				VERBOSE(tracee, 5,
 						"vpid %" PRIu64 ": suppressing signal during chain signal=%d, prev suppressed_signal=%d",
 						tracee->vpid, signal, tracee->chain.suppressed_signal);

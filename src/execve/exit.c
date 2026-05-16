@@ -205,14 +205,6 @@ static int transfer_load_script(Tracee *tracee)
 		page_mask = ~(page_size - 1);
 	}
 
-	/* Capture argv[0]'s address from the initial stack as the correct
-	 * AT_EXECFN value. The kernel sets AT_EXECFN to the loader temp file
-	 * path; argv[0] holds the actual program name. This is stored so that
-	 * prctl(PR_GET_AUXV) can be fixed up later in the syscall exit handler,
-	 * since PR_GET_AUXV reads from kernel memory and bypasses the loader's
-	 * in-memory auxv patch. */
-	tracee->execfn_addr = peek_word(tracee, stack_pointer + sizeof_word(tracee));
-
 	needs_executable_stack = (tracee->load_info->needs_executable_stack
 				|| (   tracee->load_info->interp != NULL
 				    && tracee->load_info->interp->needs_executable_stack));
@@ -232,14 +224,9 @@ static int transfer_load_script(Tracee *tracee)
 
 	/* A padding will be appended at the end of the load script
 	 * (a.k.a "strings area") to ensure this latter is aligned to
-	 * a word boundary, for the sake of performance
-	 * (or 16 bytes, since AArch64 needs SP 16-bytes-aligned). */
+	 * a word boundary, for sake of performance.  */
 	padding_size = (stack_pointer - string1_size - string2_size - string3_size)
-#ifdef ARCH_ARM64
-		        % 16;
-#else
 			% sizeof_word(tracee);
-#endif
 
 	strings_size = string1_size + string2_size + string3_size + padding_size;
 	string1_address = stack_pointer - strings_size;
@@ -412,8 +399,6 @@ void translate_execve_exit(Tracee *tracee)
 {
 	word_t syscall_result;
 	int status;
-
-	tracee->auxv_fd = -1;
 
 	if (tracee->skip_proot_loader) {
 		tracee->restore_original_regs = false;

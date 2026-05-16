@@ -658,7 +658,7 @@ int translate_execve_enter(Tracee *tracee)
 	talloc_unlink(tracee, tracee->load_info);
 
 	if (tracee->skip_proot_loader) {
-		tracee->load_info = NULL;
+		TALLOC_FREE(tracee->load_info);
 		tracee->heap->disabled = true;
 
 		status = set_sysarg_path(tracee, host_path, SYSARG_1);

@@ -405,7 +405,7 @@ int sysvipc_shmat_chain(Tracee *tracee, struct SysVIpcConfig *config)
 
 		size_t page_size = sysconf(_SC_PAGESIZE);
 		size_t map_size = shm->stats.shm_segsz;
-		map_size = (map_size + (page_size - 1)) & ~(page_size - 1);
+		map_size = (map_size + (page_size - 1)) & ~page_size;
 
 		word_t mmap_sysnum = detranslate_sysnum(get_abi(tracee), PR_mmap2) != SYSCALL_AVOIDER
 			? PR_mmap2
