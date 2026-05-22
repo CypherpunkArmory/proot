@@ -2,7 +2,7 @@
  * no_orphans extension: ensures all tracees appear to have PRoot as their
  * parent, preventing orphaned processes.  A virtual process tree tracks
  * what the PPID relationships would be without this extension.  getppid(2)
- * and /proc/*/stat and /proc/*/status reads are rewritten to report the
+ * and /proc/<pid>/stat and /proc/<pid>/status reads are rewritten to report the
  * virtual (real) PPID rather than PRoot's PID.  When a virtual parent
  * dies, its virtual children are reparented in the virtual tree, and
  * SIGHUP is delivered if the dying process was a session leader.
@@ -135,13 +135,13 @@ static void ensure_in_virtual_tree(Tracee *tracee)
 }
 
 /* ---------------------------------------------------------------------- */
-/* Per-tracee fd tracking for /proc/*/stat and /proc/*/status              */
+/* Per-tracee fd tracking for /proc/<pid>/stat and /proc/<pid>/status       */
 /* ---------------------------------------------------------------------- */
 
 typedef struct fd_entry {
 	int   fd;
 	pid_t target_pid;
-	bool  is_status;   /* false = /proc/*/stat, true = /proc/*/status */
+	bool  is_status;   /* false = /proc/<pid>/stat, true = /proc/<pid>/status */
 	LIST_ENTRY(fd_entry) link;
 } FdEntry;
 
@@ -202,7 +202,7 @@ static bool parse_proc_stat_path(const char *path, pid_t self_pid,
 /* Buffer patching                                                          */
 /* ---------------------------------------------------------------------- */
 
-/* Replace the PPID field in /proc/*/stat content held in buf[0..len).
+/* Replace the PPID field in /proc/<pid>/stat content held in buf[0..len).
  * buf_capacity is the total size of buf (may be larger than len to allow
  * in-place expansion).  Returns the new length, or -1 on error. */
 static ssize_t patch_stat_ppid(char *buf, ssize_t len, ssize_t buf_capacity,
@@ -215,7 +215,7 @@ static ssize_t patch_stat_ppid(char *buf, ssize_t len, ssize_t buf_capacity,
 	int   new_str_len;
 	ssize_t old_field_len, delta, new_len;
 
-	/* /proc/*/stat format: "pid (comm) state ppid ..."
+	/* /proc/<pid>/stat format: "pid (comm) state ppid ..."
 	 * comm can contain spaces, so find the last ')'. */
 	last_rparen = NULL;
 	for (ssize_t i = len - 1; i >= 0; i--) {
@@ -260,7 +260,7 @@ static ssize_t patch_stat_ppid(char *buf, ssize_t len, ssize_t buf_capacity,
 	return new_len;
 }
 
-/* Replace the PPid line in /proc/*/status content.
+/* Replace the PPid line in /proc/<pid>/status content.
  * Returns the new length, or -1 on error. */
 static ssize_t patch_status_ppid(char *buf, ssize_t len, ssize_t buf_capacity,
 				pid_t new_ppid)
@@ -533,7 +533,7 @@ static void handle_execve_exit(Tracee *tracee UNUSED, Config *config)
 
 	/* After a successful exec, FD_CLOEXEC descriptors are gone and we
 	 * don't track which fds had that flag set.  Wipe the table; any
-	 * /proc/*/stat fds the new image needs will be re-tracked on open. */
+	 * /proc/<pid>/stat fds the new image needs will be re-tracked on open. */
 	while (!LIST_EMPTY(&config->open_fds)) {
 		fe = LIST_FIRST(&config->open_fds);
 		LIST_REMOVE(fe, link);
