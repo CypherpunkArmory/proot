@@ -207,5 +207,6 @@ extern int link2symlink_callback(Extension *extension, ExtensionEvent event, int
 extern int fix_symlink_size_callback(Extension *extension, ExtensionEvent event, intptr_t d1, intptr_t d2);
 extern int fix_selinux_xattr_callback(Extension *extension, ExtensionEvent event, intptr_t d1, intptr_t d2);
 extern int droid_files_callback(Extension *extension, ExtensionEvent event, intptr_t d1, intptr_t d2);
+extern int no_orphans_callback(Extension *extension, ExtensionEvent event, intptr_t d1, intptr_t d2);
 
 #endif /* EXTENSION_H */

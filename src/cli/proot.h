@@ -68,6 +68,7 @@ static int handle_option_L(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_fix_selinux_xattr(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_H(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_p(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_no_orphans(Tracee *tracee, const Cli *cli, const char *value);
 
 static int pre_initialize_bindings(Tracee *, const Cli *, size_t, char *const *, size_t);
 static int post_initialize_exe(Tracee *, const Cli *, size_t, char *const *, size_t);
@@ -295,6 +296,20 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
           .detail = "\tChanges the value of setxattr from EACCES or EPERM to ENOTSUP \
  when trying to write security.selinux.",
         },
+	{ .class = "Extension options",
+	  .arguments = {
+		{ .name = "--no-orphans", .separator = '\0', .value = NULL },
+		{ .name = NULL, .separator = '\0', .value = NULL } },
+	  .handler = handle_option_no_orphans,
+	  .description = "Prevent orphaned processes by reparenting all tracees to PRoot.",
+	  .detail = "\tMakes PRoot the subreaper for all traced processes so that no\n\
+\tprocess becomes an orphan when its parent exits.  A virtual\n\
+\tprocess tree tracks the real parent-child relationships.\n\
+\tgetppid(2), /proc/*/stat, and /proc/*/status are rewritten to\n\
+\treport the virtual (real) PPID.  When a virtual parent dies,\n\
+\tits children are reparented in the virtual tree and SIGHUP is\n\
+\tdelivered if the dying process was a session leader.",
+	},
 	{ .class = "Alias options",
 	  .arguments = {
 		{ .name = "-R", .separator = ' ', .value = "path" },

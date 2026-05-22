@@ -341,6 +341,17 @@ static int handle_option_p(Tracee *tracee, const Cli *cli UNUSED, const char *va
         return 0;
 }
 
+static int handle_option_no_orphans(Tracee *tracee, const Cli *cli UNUSED, const char *value UNUSED)
+{
+	int status;
+
+	status = initialize_extension(tracee, no_orphans_callback, NULL);
+	if (status < 0)
+		note(tracee, WARNING, INTERNAL, "no-orphans not initialized");
+
+	return 0;
+}
+
 /**
  * Initialize @tracee->qemu.
  */
