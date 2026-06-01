@@ -303,12 +303,7 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
 	  .handler = handle_option_no_orphans,
 	  .description = "Prevent orphaned processes by reparenting all tracees to PRoot.",
 	  .detail = "\tMakes PRoot the subreaper for all traced processes so that no\n\
-\tprocess becomes an orphan when its parent exits.  A virtual\n\
-\tprocess tree tracks the real parent-child relationships.\n\
-\tgetppid(2), /proc/*/stat, and /proc/*/status are rewritten to\n\
-\treport the virtual (real) PPID.  When a virtual parent dies,\n\
-\tits children are reparented in the virtual tree and SIGHUP is\n\
-\tdelivered if the dying process was a session leader.",
+\tprocess becomes an orphan when its parent exits.",
 	},
 	{ .class = "Alias options",
 	  .arguments = {
