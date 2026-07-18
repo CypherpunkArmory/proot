@@ -206,7 +206,8 @@ int canonicalize(Tracee *tracee, const char *user_path, bool deref_final,
 	unsigned int symlinks_followed = 0;
 
 	/* Avoid infinite loop on circular links.  */
-	if (recursion_level > MAXSYMLINKS)
+	//if (recursion_level > MAXSYMLINKS)
+	if (recursion_level > 3)
 		return -ELOOP;
 
 	/* Sanity checks.  */
