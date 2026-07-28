@@ -77,16 +77,8 @@ void translate_syscall_exit(Tracee *tracee)
 
 	/* If proot changed syscall to PR_void during enter,
 	 * keep syscall result set during entry. */
-	if (peek_reg(tracee, MODIFIED, SYSARG_NUM) ==
-#if defined(ARCH_ARM64) || defined(ARCH_X86_64)
-			(is_32on64_mode(tracee) ? (SYSCALL_AVOIDER & 0xFFFFFFFF) : SYSCALL_AVOIDER)
-#else
-			SYSCALL_AVOIDER
-#endif
-			&&
-			peek_reg(tracee, ORIGINAL, SYSARG_NUM) != peek_reg(tracee, MODIFIED, SYSARG_NUM)) {
+	if (is_voided_syscall(tracee, MODIFIED))
 		poke_reg(tracee, SYSARG_RESULT, peek_reg(tracee, MODIFIED, SYSARG_RESULT));
-	}
 
 	/* Translate output arguments:
 	 * - break: update the syscall result register with "status"

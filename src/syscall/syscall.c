@@ -100,6 +100,24 @@ int set_sysarg_path(Tracee *tracee, const char path[PATH_MAX], Reg reg)
 	return set_sysarg_data(tracee, path, strlen(path) + 1, reg);
 }
 
+/**
+ * Tell whether the syscall number the @tracee holds in @version is the
+ * avoider, ie. whether PRoot replaced the syscall the tracee asked for
+ * with a no-op in order to answer it itself.
+ */
+bool is_voided_syscall(const Tracee *tracee, RegVersion version)
+{
+	word_t avoider = SYSCALL_AVOIDER;
+
+#if defined(ARCH_ARM64) || defined(ARCH_X86_64)
+	if (is_32on64_mode(tracee))
+		avoider &= 0xFFFFFFFF;
+#endif
+
+	return peek_reg(tracee, version, SYSARG_NUM) == avoider
+	    && peek_reg(tracee, ORIGINAL, SYSARG_NUM) != avoider;
+}
+
 void translate_syscall(Tracee *tracee)
 {
 	const bool is_enter_stage = IS_IN_SYSENTER(tracee);
@@ -158,8 +176,28 @@ void translate_syscall(Tracee *tracee)
 			tracee->restart_how = PTRACE_SYSCALL;
 #endif
 		}
-		else
+		else {
 			tracee->status = 1;
+
+			/* PRoot answers some syscalls itself: their number was
+			 * replaced with the avoider and their result poked
+			 * just now, at the enter stage.  That avoider syscall
+			 * still reaches the host kernel, which is free to
+			 * overwrite the result register -- with -ENOSYS when
+			 * it doesn't implement the number, or with the
+			 * syscall's own first argument when an outer seccomp
+			 * policy traps it, since SECCOMP_RET_TRAP rolls the
+			 * registers back to their pre-syscall values (Android
+			 * sandboxes do exactly that to the in-range number ARM
+			 * uses as the avoider).  Only translate_syscall_exit()
+			 * puts the faked result back, so make sure the exit
+			 * stage is reached; syscalls whose seccomp filter entry
+			 * already asks for it just keep what they had.  */
+			if (is_voided_syscall(tracee, CURRENT)) {
+				tracee->sysexit_pending = true;
+				tracee->restart_how = PTRACE_SYSCALL;
+			}
+		}
 
 #ifdef HAS_POKEDATA_WORKAROUND
 		if (tracee->pokedata_workaround_cancelled_syscall) {
