@@ -26,6 +26,7 @@
 #include <sys/types.h>  /* waitpid(2), */
 #include <sys/wait.h>   /* waitpid(2), */
 #include <sys/utsname.h> /* uname(2), */
+#include <signal.h>     /* signal(2), SIG_DFL, */
 #include <unistd.h>     /* fork(2), chdir(2), getpid(2), */
 #include <string.h>     /* strcmp(3), */
 #include <errno.h>      /* errno(3), */
@@ -78,6 +79,18 @@ int launch_process(Tracee *tracee, char *const argv[])
 		return -errno;
 
 	case 0: /* child */
+		/* SIG_IGN survives fork(2) and execve(2), so an ignored
+		 * SIGPIPE anywhere above proot is inherited by every
+		 * process of the guest: write(2) then fails with EPIPE
+		 * instead of quietly killing the writer, and pipelines
+		 * whose reader exits early become noisy ("yes: standard
+		 * output: Broken pipe" for `yes | head -1`, "bash: echo:
+		 * write error: Broken pipe" for `echo <(echo a)`).  This
+		 * is what guests get under proot-distro on Termux.  Give
+		 * the guest the disposition it would have on a normal
+		 * system, like container runtimes do.  */
+		signal(SIGPIPE, SIG_DFL);
+
 		/* Declare myself as ptraceable before executing the
 		 * requested program. */
 		status = ptrace(PTRACE_TRACEME, 0, NULL, NULL);
