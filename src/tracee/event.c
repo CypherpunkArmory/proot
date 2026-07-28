@@ -130,6 +130,12 @@ static void kill_all_tracees2(int signum, siginfo_t *siginfo UNUSED, void *ucont
 		_exit(EXIT_FAILURE);
 }
 
+/* Interrupt waitpid(2) so the event loop gets a chance to run its
+ * periodic work.  Nothing else to do here.  */
+static void wakeup_event_loop(int signum UNUSED, siginfo_t *siginfo UNUSED, void *ucontext UNUSED)
+{
+}
+
 /**
  * Helper for print_talloc_hierarchy().
  */
@@ -321,21 +327,53 @@ int event_loop()
 			note(NULL, WARNING, SYSTEM, "sigaction(%d)", signum);
 	}
 
+	/* Shadow pipes must be released even when no tracee is running:
+	 * a writer blocked on a full pipe generates no ptrace event.
+	 * SIGALRM is the loop's own wake-up call, so -- unlike the
+	 * handlers above -- it must *not* restart waitpid(2).  Tracees
+	 * are unaffected: they are forked before this point.  */
+	bzero(&signal_action, sizeof(signal_action));
+	signal_action.sa_flags = SA_SIGINFO;
+	signal_action.sa_sigaction = wakeup_event_loop;
+	status = sigfillset(&signal_action.sa_mask);
+	if (status < 0)
+		note(NULL, WARNING, SYSTEM, "sigfillset()");
+
+	status = sigaction(SIGALRM, &signal_action, NULL);
+	if (status < 0)
+		note(NULL, WARNING, SYSTEM, "sigaction(SIGALRM)");
+
 	while (1) {
 		int tracee_status;
 		Tracee *tracee;
+		int saved_errno;
 		int signal;
 		pid_t pid;
 
 		/* This is the only safe place to free tracees.  */
 		free_terminated_tracees();
 
-		/* Close shadow pipe read ends whose last writer exited.  */
-		shadow_pipes_close_eof();
+		/* Release shadow pipe read ends that are of no use
+		 * anymore.  */
+		shadow_pipes_reap();
+
+		/* As long as shadows are held, wake up periodically to
+		 * re-check them; the tracees concerned may all be
+		 * blocked, in which case no event is ever coming.  The
+		 * timer is disarmed as soon as waitpid(2) returns, so
+		 * SIGALRM cannot interfere with the ptrace helpers that
+		 * do their own waitpid(2).  */
+		shadow_pipes_set_timer(shadow_pipes_held());
 
 		/* Wait for the next tracee's stop. */
 		pid = waitpid(-1, &tracee_status, __WALL);
+		saved_errno = errno;
+		shadow_pipes_set_timer(false);
+		errno = saved_errno;
+
 		if (pid < 0) {
+			if (errno == EINTR)
+				continue;
 			if (errno != ECHILD) {
 				note(NULL, ERROR, SYSTEM, "waitpid()");
 				return EXIT_FAILURE;

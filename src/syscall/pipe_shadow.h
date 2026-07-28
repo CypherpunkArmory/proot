@@ -24,6 +24,7 @@
 #define PIPE_SHADOW_H
 
 #include <sys/types.h>
+#include <stdbool.h>
 
 /**
  * If @tracee_fd is a pipe read end in @tracee_pid's fd table, open a
@@ -39,9 +40,24 @@
 void shadow_pipe_read_end(pid_t tracee_pid, int tracee_fd);
 
 /**
- * Close any shadow fds whose pipe has no more writers (poll POLLHUP).
- * Call this once per event loop iteration; it is non-blocking.
+ * Close any shadow fd that has become useless — no writer is left
+ * (POLLHUP), the pipe is too full for a writer to make progress, or
+ * the close race it was opened for is long over.  Call this once per
+ * event loop iteration; it is non-blocking.
  */
-void shadow_pipes_close_eof(void);
+void shadow_pipes_reap(void);
+
+/**
+ * Return true when at least one shadow fd is currently held.
+ */
+bool shadow_pipes_held(void);
+
+/**
+ * Arm (@enabled) or disarm a one-shot ITIMER_REAL used to interrupt
+ * waitpid(2) so shadow_pipes_reap() runs even while every tracee is
+ * blocked — a writer blocked on a full pipe generates no ptrace event.
+ * The caller must handle SIGALRM without SA_RESTART.
+ */
+void shadow_pipes_set_timer(bool enabled);
 
 #endif /* PIPE_SHADOW_H */
