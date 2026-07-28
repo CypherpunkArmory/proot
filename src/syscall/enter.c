@@ -1339,7 +1339,7 @@ static void build_fake_netlink_reply(Tracee *tracee, word_t buf_addr,
 	uint8_t *out = tracee->fake_netlink_reply;
 	size_t   max = sizeof(tracee->fake_netlink_reply);
 	uint32_t pid = (uint32_t) tracee->pid;
-	uint32_t seq;
+	uint32_t seq = 0;
 	uint16_t type, flags;
 	bool dump;
 	size_t off = 0;
@@ -1347,10 +1347,10 @@ static void build_fake_netlink_reply(Tracee *tracee, word_t buf_addr,
 	tracee->fake_netlink_reply_len = 0;
 
 	if (buf_addr == 0 || buf_len < sizeof(hdr))
-		return;
+		goto reply;
 	req_len = buf_len < sizeof(req) ? buf_len : sizeof(req);
 	if (read_data(tracee, req, buf_addr, req_len) < 0)
-		return;
+		goto reply;
 
 	memcpy(&hdr, req, sizeof(hdr));
 	type  = hdr.nlmsg_type;
@@ -1421,6 +1421,13 @@ static void build_fake_netlink_reply(Tracee *tracee, word_t buf_addr,
 			off = nl_build_error(out, off, max, seq, pid, 0);
 		break;
 	}
+
+reply:
+	/* Never leave a request unanswered: rtnetlink always has something
+	 * to say, and the read that follows now waits on our substitute
+	 * socket rather than being handed a zero-length message.  */
+	if (off == 0)
+		off = nl_build_error(out, off, max, seq, pid, -EINVAL);
 
 	tracee->fake_netlink_reply_len = off;
 }
@@ -2030,7 +2037,19 @@ int translate_syscall_enter(Tracee *tracee)
 			size_t copied    = 0;
 			size_t result;
 
-			if (reply_len > 0 && buf != 0) {
+			/* Nothing synthesised for this fd: rtnetlink never
+			 * delivers a zero-length datagram, and reporting one
+			 * makes every caller that reads until NLMSG_DONE spin
+			 * forever.  Let the read reach our substitute socket
+			 * instead: its receive queue is always empty, so the
+			 * kernel blocks or reports EAGAIN just like a netlink
+			 * socket with nothing left to say.  */
+			if (reply_len == 0) {
+				status = 0;
+				break;
+			}
+
+			if (buf != 0) {
 				copied = len < reply_len ? len : reply_len;
 				if (copied > 0 &&
 				    write_data(tracee, buf,
@@ -2073,6 +2092,14 @@ int translate_syscall_enter(Tracee *tracee)
 			size_t reply_len = tracee->fake_netlink_reply_len;
 			size_t scattered = 0;
 			size_t result;
+
+			/* See PR_recvfrom above: an empty receive queue is
+			 * reported by the substitute socket itself, never as a
+			 * zero-length netlink message.  */
+			if (reply_len == 0) {
+				status = 0;
+				break;
+			}
 
 			if (msghdr_addr != 0) {
 				msg_name  = peek_word(tracee, msghdr_addr);
