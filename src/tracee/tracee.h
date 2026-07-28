@@ -131,13 +131,16 @@ typedef struct tracee {
 	 * belongs to the socket rather than to the tracee because sockets
 	 * have receive queues of their own: iproute2 walks a route dump on
 	 * one of them while a second answers the interface lookups it makes
-	 * along the way.  The buffer is allocated on demand.  */
+	 * along the way.  The buffer is allocated on demand and handed back
+	 * one datagram at a time ("reply_off" is how far the tracee has
+	 * read), since that is how the kernel delivers a dump.  */
 #define MAX_FAKE_NETLINK_FDS 8
 #define MAX_FAKE_NETLINK_REPLY 8192
 	struct fake_netlink_socket {
 		int fd;
 		uint8_t *reply;
 		size_t reply_len;
+		size_t reply_off;
 	} fake_netlink_fds[MAX_FAKE_NETLINK_FDS];
 	int fake_netlink_fds_count;
 	bool pending_fake_netlink_socket;
