@@ -594,8 +594,11 @@ int new_child(Tracee *parent, word_t clone_flags)
 	 * recognising the netlink sockets its parent opened.  The reply
 	 * pending on either of them doesn't carry over: it belongs to
 	 * whoever sent the request.  */
-	memcpy(child->fake_netlink_fds, parent->fake_netlink_fds,
-	       sizeof(child->fake_netlink_fds));
+	for (int i = 0; i < parent->fake_netlink_fds_count; i++) {
+		child->fake_netlink_fds[i].fd = parent->fake_netlink_fds[i].fd;
+		child->fake_netlink_fds[i].reply = NULL;
+		child->fake_netlink_fds[i].reply_len = 0;
+	}
 	child->fake_netlink_fds_count = parent->fake_netlink_fds_count;
 	memcpy(child->netlink_route_fds, parent->netlink_route_fds,
 	       sizeof(child->netlink_route_fds));

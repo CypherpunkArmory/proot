@@ -605,27 +605,38 @@ blocked:
 	return true;
 }
 
-static bool is_fake_netlink_fd(const Tracee *tracee, int fd)
+/* The bookkeeping entry for @fd, or NULL when PRoot didn't substitute
+ * that fd.  */
+static struct fake_netlink_socket *fake_netlink_socket(Tracee *tracee, int fd)
 {
 	int i;
+
 	if (fd < 0)
-		return false;
+		return NULL;
+
 	for (i = 0; i < tracee->fake_netlink_fds_count; i++)
-		if (tracee->fake_netlink_fds[i] == fd)
-			return true;
-	return false;
+		if (tracee->fake_netlink_fds[i].fd == fd)
+			return &tracee->fake_netlink_fds[i];
+
+	return NULL;
+}
+
+static bool is_fake_netlink_fd(Tracee *tracee, int fd)
+{
+	return fake_netlink_socket(tracee, fd) != NULL;
 }
 
 static void unmark_fake_netlink_fd(Tracee *tracee, int fd)
 {
-	int i;
-	for (i = 0; i < tracee->fake_netlink_fds_count; i++) {
-		if (tracee->fake_netlink_fds[i] == fd) {
-			tracee->fake_netlink_fds[i] =
-				tracee->fake_netlink_fds[--tracee->fake_netlink_fds_count];
-			return;
-		}
-	}
+	struct fake_netlink_socket *sock = fake_netlink_socket(tracee, fd);
+
+	if (sock == NULL)
+		return;
+
+	/* A reply the tracee never got round to reading dies with its
+	 * socket, just like the datagrams left in a receive queue.  */
+	talloc_free(sock->reply);
+	*sock = tracee->fake_netlink_fds[--tracee->fake_netlink_fds_count];
 }
 
 /**
@@ -1324,8 +1335,8 @@ static size_t relay_route_dump(const uint8_t *req, size_t req_len,
 /**
  * Parse the netlink request the tracee just sent (whether via sendto
  * with a flat buffer or via sendmsg with an iovec) and build the reply
- * the kernel would have produced into tracee->fake_netlink_reply, so a
- * later recvmsg / recvfrom on the same fake netlink fd can hand it back.
+ * the kernel would have produced into @sock's buffer, so a later
+ * recvmsg / recvfrom on that same fake netlink fd can hand it back.
  *
  * RTM_GETLINK / RTM_GETADDR are answered with the *real* host interfaces
  * (enumerated via getifaddrs, which keeps working under Android's netlink
@@ -1335,21 +1346,31 @@ static size_t relay_route_dump(const uint8_t *req, size_t req_len,
  * ack.  Replies carry the request's nlmsg_seq and the tracee's pid in
  * nlmsg_pid, which iproute2 / bubblewrap match against before accepting.
  */
-static void build_fake_netlink_reply(Tracee *tracee, word_t buf_addr,
-				     word_t buf_len)
+static void build_fake_netlink_reply(Tracee *tracee, struct fake_netlink_socket *sock,
+				     word_t buf_addr, word_t buf_len)
 {
 	uint8_t req[256] __attribute__((aligned(8)));
 	size_t  req_len;
 	struct nlmsghdr hdr;
-	uint8_t *out = tracee->fake_netlink_reply;
-	size_t   max = sizeof(tracee->fake_netlink_reply);
+	uint8_t *out;
+	size_t   max = MAX_FAKE_NETLINK_REPLY;
 	uint32_t pid = (uint32_t) tracee->pid;
 	uint32_t seq = 0;
 	uint16_t type, flags;
 	bool dump;
 	size_t off = 0;
 
-	tracee->fake_netlink_reply_len = 0;
+	sock->reply_len = 0;
+
+	/* Only sockets the tracee actually sent a request on need a buffer,
+	 * and talloc hands back memory aligned well past what struct
+	 * nlmsghdr and the rtnetlink payloads we lay out in it need.  */
+	if (sock->reply == NULL) {
+		sock->reply = talloc_size(tracee, max);
+		if (sock->reply == NULL)
+			return;
+	}
+	out = sock->reply;
 
 	if (buf_addr == 0 || buf_len < sizeof(hdr))
 		goto reply;
@@ -1434,19 +1455,19 @@ reply:
 	if (off == 0)
 		off = nl_build_error(out, off, max, seq, pid, -EINVAL);
 
-	tracee->fake_netlink_reply_len = off;
+	sock->reply_len = off;
 }
 
 /**
- * Copy the pending fake netlink reply into the tracee's recvmsg iovec
+ * Copy the @reply_len bytes at @reply into the tracee's recvmsg iovec
  * array (@iov_ptr, @iov_count), walking segments until the reply is
  * exhausted.  Returns the number of bytes actually scattered (which may
  * be less than the reply when the caller's buffers are too small).
  */
 static size_t scatter_fake_netlink_reply(Tracee *tracee, word_t iov_ptr,
-					 word_t iov_count)
+					 word_t iov_count,
+					 const uint8_t *reply, size_t reply_len)
 {
-	size_t reply_len = tracee->fake_netlink_reply_len;
 	size_t w = sizeof_word(tracee);
 	size_t done = 0;
 	word_t i;
@@ -1461,8 +1482,7 @@ static size_t scatter_fake_netlink_reply(Tracee *tracee, word_t iov_ptr,
 		if (chunk > len)
 			chunk = len;
 		if (base != 0 && chunk > 0) {
-			if (write_data(tracee, base,
-				       tracee->fake_netlink_reply + done, chunk) < 0)
+			if (write_data(tracee, base, reply + done, chunk) < 0)
 				break;
 		}
 		done += chunk;
@@ -1984,9 +2004,10 @@ int translate_syscall_enter(Tracee *tracee)
 		int fd = peek_reg(tracee, CURRENT, SYSARG_1);
 		word_t buf = peek_reg(tracee, CURRENT, SYSARG_2);
 		word_t len = peek_reg(tracee, CURRENT, SYSARG_3);
+		struct fake_netlink_socket *sock = fake_netlink_socket(tracee, fd);
 
-		if (is_fake_netlink_fd(tracee, fd)) {
-			build_fake_netlink_reply(tracee, buf, len);
+		if (sock != NULL) {
+			build_fake_netlink_reply(tracee, sock, buf, len);
 
 			poke_reg(tracee, SYSARG_RESULT, len);
 			set_sysnum(tracee, PR_void);
@@ -2002,12 +2023,13 @@ int translate_syscall_enter(Tracee *tracee)
 		int fd = peek_reg(tracee, CURRENT, SYSARG_1);
 		word_t msghdr_addr = peek_reg(tracee, CURRENT, SYSARG_2);
 		word_t base = 0, len = 0;
+		struct fake_netlink_socket *sock = fake_netlink_socket(tracee, fd);
 
-		if (is_fake_netlink_fd(tracee, fd)) {
+		if (sock != NULL) {
 			word_t total = 0;
 
 			if (msghdr_first_iovec(tracee, msghdr_addr, &base, &len)) {
-				build_fake_netlink_reply(tracee, base, len);
+				build_fake_netlink_reply(tracee, sock, base, len);
 				/* Use the first iovec's length as the
 				 * pretended bytes-sent.  Multi-iovec
 				 * netlink requests are unheard of for
@@ -2033,17 +2055,19 @@ int translate_syscall_enter(Tracee *tracee)
 
 	case PR_recvfrom: {
 		int fd = peek_reg(tracee, CURRENT, SYSARG_1);
-		if (is_fake_netlink_fd(tracee, fd)) {
+		struct fake_netlink_socket *sock = fake_netlink_socket(tracee, fd);
+
+		if (sock != NULL) {
 			word_t buf       = peek_reg(tracee, CURRENT, SYSARG_2);
 			word_t len       = peek_reg(tracee, CURRENT, SYSARG_3);
 			int    flags     = (int) peek_reg(tracee, CURRENT, SYSARG_4);
 			word_t addr_ptr  = peek_reg(tracee, CURRENT, SYSARG_5);
 			word_t size_ptr  = peek_reg(tracee, CURRENT, SYSARG_6);
-			size_t reply_len = tracee->fake_netlink_reply_len;
+			size_t reply_len = sock->reply_len;
 			size_t copied    = 0;
 			size_t result;
 
-			/* Nothing synthesised for this fd: rtnetlink never
+			/* Nothing left to deliver on this fd: rtnetlink never
 			 * delivers a zero-length datagram, and reporting one
 			 * makes every caller that reads until NLMSG_DONE spin
 			 * forever.  Let the read reach our substitute socket
@@ -2058,8 +2082,7 @@ int translate_syscall_enter(Tracee *tracee)
 			if (buf != 0) {
 				copied = len < reply_len ? len : reply_len;
 				if (copied > 0 &&
-				    write_data(tracee, buf,
-					       tracee->fake_netlink_reply, copied) < 0)
+				    write_data(tracee, buf, sock->reply, copied) < 0)
 					copied = 0;
 			}
 
@@ -2067,7 +2090,7 @@ int translate_syscall_enter(Tracee *tracee)
 			 * that follows; MSG_TRUNC asks for the untruncated
 			 * length (the libnetlink size-probe pattern).  */
 			if (!(flags & MSG_PEEK))
-				tracee->fake_netlink_reply_len = 0;
+				sock->reply_len = 0;
 			result = (flags & MSG_TRUNC) ? reply_len : copied;
 
 			/* Hand back a kernel sockaddr_nl (nl_pid == 0) source
@@ -2089,13 +2112,15 @@ int translate_syscall_enter(Tracee *tracee)
 
 	case PR_recvmsg: {
 		int fd = peek_reg(tracee, CURRENT, SYSARG_1);
-		if (is_fake_netlink_fd(tracee, fd)) {
+		struct fake_netlink_socket *sock = fake_netlink_socket(tracee, fd);
+
+		if (sock != NULL) {
 			word_t msghdr_addr = peek_reg(tracee, CURRENT, SYSARG_2);
 			int    flags = (int) peek_reg(tracee, CURRENT, SYSARG_3);
 			size_t w = sizeof_word(tracee);
 			word_t msg_name = 0;
 			word_t iov_ptr = 0, iov_count = 0;
-			size_t reply_len = tracee->fake_netlink_reply_len;
+			size_t reply_len = sock->reply_len;
 			size_t scattered = 0;
 			size_t result;
 
@@ -2118,13 +2143,15 @@ int translate_syscall_enter(Tracee *tracee)
 
 			if (iov_ptr != 0 && iov_count > 0)
 				scattered = scatter_fake_netlink_reply(tracee, iov_ptr,
-								       iov_count);
+								       iov_count,
+								       sock->reply,
+								       reply_len);
 
 			/* MSG_PEEK leaves the reply pending for the real read
 			 * that follows; MSG_TRUNC asks for the untruncated
 			 * length (iproute2's libnetlink size-probe pattern).  */
 			if (!(flags & MSG_PEEK))
-				tracee->fake_netlink_reply_len = 0;
+				sock->reply_len = 0;
 			result = (flags & MSG_TRUNC) ? reply_len : scattered;
 
 			/* glibc's getifaddrs() and friends inspect the

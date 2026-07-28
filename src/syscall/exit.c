@@ -735,13 +735,17 @@ void translate_syscall_exit(Tracee *tracee)
 					/* Avoid duplicates.  */
 					bool present = false;
 					for (i = 0; i < tracee->fake_netlink_fds_count; i++) {
-						if (tracee->fake_netlink_fds[i] == fd) {
+						if (tracee->fake_netlink_fds[i].fd == fd) {
 							present = true;
 							break;
 						}
 					}
-					if (!present)
-						tracee->fake_netlink_fds[tracee->fake_netlink_fds_count++] = fd;
+					if (!present) {
+						struct fake_netlink_socket *sock =
+							&tracee->fake_netlink_fds[tracee->fake_netlink_fds_count++];
+						memset(sock, 0, sizeof(*sock));
+						sock->fd = fd;
+					}
 				}
 			}
 			tracee->pending_fake_netlink_socket = false;

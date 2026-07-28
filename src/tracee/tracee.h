@@ -122,20 +122,25 @@ typedef struct tracee {
 	/* Emulation of AF_NETLINK / NETLINK_ROUTE sockets for
 	 * sandbox helpers like bubblewrap that try to bring up the
 	 * loopback interface inside their would-be net namespace.
-	 * fake_netlink_fds holds the fds of sockets we silently
+	 * fake_netlink_fds holds one entry per socket we silently
 	 * redirected from AF_NETLINK to AF_UNIX/SOCK_DGRAM; see
-	 * enter.c / exit.c for the intercepts.  */
+	 * enter.c / exit.c for the intercepts.
+	 *
+	 * "reply" is what PRoot synthesised at send time for that socket's
+	 * latest request, waiting for the matching recvmsg / recvfrom.  It
+	 * belongs to the socket rather than to the tracee because sockets
+	 * have receive queues of their own: iproute2 walks a route dump on
+	 * one of them while a second answers the interface lookups it makes
+	 * along the way.  The buffer is allocated on demand.  */
 #define MAX_FAKE_NETLINK_FDS 8
-	int fake_netlink_fds[MAX_FAKE_NETLINK_FDS];
+#define MAX_FAKE_NETLINK_REPLY 8192
+	struct fake_netlink_socket {
+		int fd;
+		uint8_t *reply;
+		size_t reply_len;
+	} fake_netlink_fds[MAX_FAKE_NETLINK_FDS];
 	int fake_netlink_fds_count;
 	bool pending_fake_netlink_socket;
-	/* Reply synthesised at send time for the most recent request on a
-	 * fake netlink fd, awaiting the matching recvmsg / recvfrom.  The
-	 * buffer is word-aligned because we lay out struct nlmsghdr and the
-	 * rtnetlink payloads directly into it.  */
-#define MAX_FAKE_NETLINK_REPLY 8192
-	uint8_t fake_netlink_reply[MAX_FAKE_NETLINK_REPLY] __attribute__((aligned(8)));
-	size_t fake_netlink_reply_len;
 
 	/* Fds of the *real* NETLINK_ROUTE sockets a tracee got when the
 	 * host didn't need the substitution above.  Such a socket lives
