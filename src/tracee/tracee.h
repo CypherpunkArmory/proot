@@ -229,6 +229,13 @@ typedef struct tracee {
 	 * without affecting state of any registers.  */
 	bool skip_next_seccomp_signal;
 
+	/* True when the sysenter stage voided the current syscall into a
+	 * number the host kernel cancels instead of executing.  Such a
+	 * syscall reports no sysenter ptrace stop, only a sysexit one, so
+	 * the event loop must not expect the former.  Set at the end of
+	 * the sysenter stage by translate_syscall().  */
+	bool voided_syscall_cancelled;
+
 	/* True when an outer-seccomp SIGSYS was preceded by a synthesized
 	 * sysexit (translate_syscall) that may have poked SYSARG_RESULT.  On
 	 * ARM/ARM64 SYSARG_RESULT aliases SYSARG_1, so the blocked syscall's

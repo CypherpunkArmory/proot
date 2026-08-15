@@ -611,7 +611,18 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 			if (tracee->seccomp == DISABLING)
 				tracee->restart_how = PTRACE_SYSCALL;
 
-			if (!seccomp_after_ptrace_enter && tracee->restart_how == PTRACE_SYSCALL)
+			/* On kernels which evaluate seccomp before the
+			 * ptrace sysenter stop, that stop is still to
+			 * come for this very syscall: PTRACE_SYSCALL
+			 * reports it and it has to be ignored since its
+			 * work was just done here.  The kernel skips it
+			 * along with the syscall itself when the enter
+			 * stage voided the syscall into a number it
+			 * cancels though; the next stop is then the
+			 * sysexit one, which must not be swallowed in
+			 * its place.  */
+			if (!seccomp_after_ptrace_enter && tracee->restart_how == PTRACE_SYSCALL
+			    && !tracee->voided_syscall_cancelled)
 				tracee->seccomp_already_handled_enter = true;
 			break;
 		}
@@ -656,6 +667,14 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 			siginfo_t siginfo = {};
 			ptrace(PTRACE_GETSIGINFO, tracee->pid, NULL, &siginfo);
 			if (siginfo.si_code == SYS_SECCOMP) {
+				/* A filter that raises SIGSYS cancels the syscall
+				 * (SECCOMP_RET_TRAP skips it), so the sysenter stop
+				 * that otherwise follows a PTRACE_EVENT_SECCOMP stop
+				 * on kernels which evaluate seccomp first is never
+				 * reported: stop waiting for it, else the sysexit
+				 * stop gets swallowed in its place.  */
+				tracee->seccomp_already_handled_enter = false;
+
 				/* Signal cannot happen when we're inside syscall,
 				 * tracee would have to exit from syscall first.
 				 * Execute exit handler now if seccomp triggered sysexit skip.  */
