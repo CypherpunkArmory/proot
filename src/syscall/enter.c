@@ -60,6 +60,7 @@
 #define IFF_LOWER_UP 0x10000
 #endif
 
+#include "cli/note.h"
 #include "syscall/syscall.h"
 #include "syscall/sysnum.h"
 #include "syscall/socket.h"
@@ -72,6 +73,7 @@
 #include "tracee/reg.h"
 #include "tracee/mem.h"
 #include "tracee/abi.h"
+#include "tracee/event.h"
 #include "path/path.h"
 #include "path/canon.h"
 #include "path/binding.h"
