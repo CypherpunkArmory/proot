@@ -217,6 +217,54 @@ static int guest_canonicalize(Tracee *tracee, const char *user_path,
 }
 
 /**
+ * If @user_path is a /proc/<pid|self>/fd/<n> reference, replace it in place with
+ * the host path that descriptor actually points at, and return true.
+ *
+ * bubblewrap never passes real paths to mount(2): it opens the source and the
+ * target with O_PATH and then binds via /proc/self/fd/<n>, which is how it avoids
+ * symlink races between resolving a path and mounting on it. Left as-is those
+ * paths canonicalize to "/proc/<pid>/fd/<n>", so emulate_mount() would record a
+ * binding under that name -- useless to the caller, which then looks for the
+ * path it asked for (e.g. "/newroot/usr") in /proc/self/mountinfo, fails to find
+ * it, and aborts with:
+ *
+ *   bwrap: Can't bind mount /usr on /usr: Unable to find "/newroot/usr" in mount table
+ *
+ * Resolving the descriptor first makes the binding land under the real path.
+ */
+static bool resolve_proc_fd_path(Tracee *tracee, char user_path[PATH_MAX])
+{
+	char host_fd_path[PATH_MAX];
+	char resolved[PATH_MAX];
+	const char *cursor;
+	ssize_t size;
+
+	/* Cheap shape test before paying for a translation: /proc/<something>/fd/<n> */
+	if (strncmp(user_path, "/proc/", 6) != 0)
+		return false;
+	cursor = strchr(user_path + 6, '/');
+	if (cursor == NULL || strncmp(cursor, "/fd/", 4) != 0)
+		return false;
+
+	/* Translation maps the guest's "self" to this tracee's real pid. */
+	if (translate_path(tracee, host_fd_path, AT_FDCWD, user_path, false) < 0)
+		return false;
+
+	size = readlink(host_fd_path, resolved, sizeof(resolved) - 1);
+	if (size < 0)
+		return false;
+	resolved[size] = '\0';
+
+	/* readlink on a deleted or anonymous descriptor yields things like
+	 * "pipe:[1234]" or a "... (deleted)" suffix -- not a path we can bind. */
+	if (resolved[0] != '/' || strstr(resolved, " (deleted)") != NULL)
+		return false;
+
+	strcpy(user_path, resolved);
+	return true;
+}
+
+/**
  * Emulate mount(@src_user, @target_user, @fstype, @flags) by adding a
  * PRoot binding from a host directory to the canonicalized target.
  * Bind mounts use the translated source; "proc"/"sysfs" use the
@@ -231,12 +279,31 @@ static void emulate_mount(Tracee *tracee, const char *src_user,
 	char host_path[PATH_MAX];
 	char guest_path[PATH_MAX];
 	const char *tmpdir;
+	char src[PATH_MAX];
+	char target[PATH_MAX];
+	bool src_is_host_path;
+	bool target_is_host_path;
 
 	if ((flags & MS_REMOUNT) != 0)
 		return;
 
+	/* Work on copies: resolve_proc_fd_path() rewrites in place, and these
+	 * arguments belong to the caller. */
+	if (strlen(src_user) >= PATH_MAX || strlen(target_user) >= PATH_MAX)
+		return;
+	strcpy(src, src_user);
+	strcpy(target, target_user);
+
+	/* Rewrite descriptor references before anything looks at these paths. */
+	src_is_host_path    = resolve_proc_fd_path(tracee, src);
+	target_is_host_path = resolve_proc_fd_path(tracee, target);
+
 	if ((flags & MS_BIND) != 0) {
-		if (translate_path(tracee, host_path, AT_FDCWD, src_user, true) < 0)
+		/* A resolved /proc/<pid>/fd/<n> source is already a host path; anything
+		 * else is still a guest path and has to be translated as before. */
+		if (src_is_host_path)
+			strcpy(host_path, src);
+		else if (translate_path(tracee, host_path, AT_FDCWD, src, true) < 0)
 			return;
 	}
 	else if (strcmp(fstype, "proc") == 0)
@@ -259,8 +326,17 @@ static void emulate_mount(Tracee *tracee, const char *src_user,
 
 	chop_finality(host_path);
 
-	if (guest_canonicalize(tracee, target_user, guest_path) < 0)
+	if (target_is_host_path) {
+		/* Resolved from a descriptor, so it is a host path: turn it back into
+		 * the guest path the caller believes it mounted on. */
+		strcpy(guest_path, target);
+		if (detranslate_path(tracee, guest_path, NULL) < 0) {
+			return;
+		}
+	}
+	else if (guest_canonicalize(tracee, target, guest_path) < 0) {
 		return;
+	}
 
 	(void) insort_binding3(tracee, tracee->fs, host_path, guest_path);
 }
@@ -2584,6 +2660,31 @@ int translate_syscall_enter(Tracee *tracee)
 		set_sysnum(tracee, PR_openat);
 		poke_reg(tracee, SYSARG_3, how.flags);
 		poke_reg(tracee, SYSARG_4, how.mode);
+
+		/* RESOLVE_IN_ROOT makes an *absolute* pathname resolve relative to
+		 * dirfd -- dirfd acts as "/".  Plain openat() does the opposite and
+		 * ignores dirfd once the path is absolute, so simply dropping the
+		 * resolve flags silently changes where the open lands.  Strip the
+		 * leading slashes to preserve the caller's meaning.
+		 *
+		 * bubblewrap depends on this: it resolves every bind source with
+		 * openat2(oldroot_fd, "/usr", ..., RESOLVE_IN_ROOT) meaning
+		 * "/oldroot/usr". Without this the path stayed absolute, resolved
+		 * against the post-pivot_root guest root instead, and bwrap died with
+		 * "Can't open source /usr: No such file or directory".  */
+		if ((how.resolve & PROOT_RESOLVE_IN_ROOT) != 0) {
+			char in_root[PATH_MAX];
+			if (get_sysarg_path(tracee, in_root, SYSARG_2) >= 0
+			    && in_root[0] == '/') {
+				const char *relative = in_root;
+				while (*relative == '/')
+					relative++;
+				status = set_sysarg_path(tracee,
+					*relative != '\0' ? relative : ".", SYSARG_2);
+				if (status < 0)
+					break;
+			}
+		}
 	}
 		/* Fall through.  */
 

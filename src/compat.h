@@ -275,4 +275,11 @@ struct proot_open_how {
 	unsigned long long resolve;
 };
 
+/* openat2(2) resolve flag: interpret an absolute pathname as relative to
+ * dirfd, i.e. treat dirfd as "/".  Named privately for the same reason as
+ * struct proot_open_how above.  */
+#ifndef PROOT_RESOLVE_IN_ROOT
+#define PROOT_RESOLVE_IN_ROOT 0x10
+#endif
+
 #endif /* COMPAT_H */
