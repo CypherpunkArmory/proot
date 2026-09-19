@@ -315,6 +315,48 @@ int readlink_proc_pid_fd(pid_t pid, int fd, char path[PATH_MAX])
  * canonicalize() for the meaning of @deref_final.  This function
  * returns -errno if an error occured, otherwise 0.
  */
+/**
+ * A descriptor's host path can be reachable through several guest paths at
+ * once, and detranslate_path() returns whichever binding it happens to match
+ * first.  That is fine for a one-shot translation, but a descriptor outlives
+ * the guest paths it was opened through: an emulated pivot_root(2) re-exposes
+ * the previous root under put_old, so host "/proc" ends up reachable as both
+ * "/proc" and "/oldroot/proc", and a second pivot_root then makes the
+ * "/oldroot" one unreachable while the descriptor is still perfectly valid.
+ *
+ * bubblewrap hits exactly this: it opens /proc early, pivot_roots twice, then
+ * does openat(proc_fd, "self").  Resolved through "/oldroot/proc" that becomes
+ * "/oldroot/proc/self", which no longer exists, and bwrap dies with
+ * "open /proc/self failed: No such file or directory" even though the
+ * descriptor is fine.
+ *
+ * Prefer the least-nested guest path for the same host path.  A put_old
+ * re-exposure is always deeper than the mount point it duplicates, so the
+ * shortest candidate is the canonical one and the one most likely to still be
+ * reachable under the current root.
+ */
+static void prefer_canonical_guest_path(Tracee *tracee, const char *host_path,
+					char guest_path[PATH_MAX])
+{
+	const Binding *binding;
+	const char *best = NULL;
+
+	if (tracee->fs->bindings.guest == NULL)
+		return;
+
+	for (binding = CIRCLEQ_FIRST(tracee->fs->bindings.guest);
+	     binding != (void *) tracee->fs->bindings.guest;
+	     binding = CIRCLEQ_NEXT(binding, link.guest)) {
+		if (strcmp(binding->host.path, host_path) != 0)
+			continue;
+		if (best == NULL || strlen(binding->guest.path) < strlen(best))
+			best = binding->guest.path;
+	}
+
+	if (best != NULL && strlen(best) < strlen(guest_path))
+		strcpy(guest_path, best);
+}
+
 int translate_path(Tracee *tracee, char result[PATH_MAX], int dir_fd,
 		const char *user_path, bool deref_final)
 {
@@ -341,9 +383,15 @@ int translate_path(Tracee *tracee, char result[PATH_MAX], int dir_fd,
 
 		/* Remove the leading "root" part of the base
 		 * (required!). */
-		status = detranslate_path(tracee, result, NULL);
-		if (status < 0)
-			return status;
+		{
+			char host_base[PATH_MAX];
+
+			strcpy(host_base, result);
+			status = detranslate_path(tracee, result, NULL);
+			if (status < 0)
+				return status;
+			prefer_canonical_guest_path(tracee, host_base, result);
+		}
 	}
 	/* It is relative to the current working directory.  */
 	else {

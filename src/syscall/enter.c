@@ -1885,6 +1885,55 @@ static void maybe_redirect_userns_file(Tracee *tracee, Reg reg)
 }
 
 /**
+ * Same redirection, but decided from the path the tracee actually asked for,
+ * before it is translated.
+ *
+ * The post-translation check above only fires once translate_path() has
+ * succeeded, and on a kernel that does not expose user namespaces these files
+ * do not exist at all -- /proc/self/uid_map is absent on stock Android -- so
+ * translation fails with ENOENT and the redirect never happens. bubblewrap
+ * then dies with "setting up uid map: No such file or directory".
+ *
+ * Resolving here also covers the descriptor-relative form bwrap actually uses:
+ * it opens /proc/<pid> once and then writes through openat(dir_fd, "uid_map"),
+ * so the interesting part of the path lives in the descriptor rather than in
+ * the argument.  Returns true when the argument was redirected.
+ */
+static bool maybe_redirect_userns_file_early(Tracee *tracee, int dirfd, Reg reg)
+{
+	char candidate[PATH_MAX];
+	char user_path[PATH_MAX];
+
+	if (get_sysarg_path(tracee, user_path, reg) < 0)
+		return false;
+
+	if (user_path[0] == '/') {
+		if (strlen(user_path) >= PATH_MAX)
+			return false;
+		strcpy(candidate, user_path);
+	}
+	else if (dirfd != AT_FDCWD) {
+		/* The descriptor's host path is what names the /proc/<pid> part. */
+		if (readlink_proc_pid_fd(tracee->pid, dirfd, candidate) < 0)
+			return false;
+		if (candidate[0] != '/')
+			return false;
+		if (strlen(candidate) + 1 + strlen(user_path) >= PATH_MAX)
+			return false;
+		if (candidate[strlen(candidate) - 1] != '/')
+			strcat(candidate, "/");
+		strcat(candidate, user_path);
+	}
+	else
+		return false;
+
+	if (!is_proc_userns_file(candidate))
+		return false;
+
+	return set_sysarg_path(tracee, "/dev/null", reg) >= 0;
+}
+
+/**
  * Translate the input arguments of the current @tracee's syscall in the
  * @tracee->pid process area. This function sets @tracee->status to
  * -errno if an error occured from the tracee's point-of-view (EFAULT
@@ -2536,6 +2585,8 @@ int translate_syscall_enter(Tracee *tracee)
 			tracee->restart_how = PTRACE_SYSCALL;
 		}
 
+		(void) maybe_redirect_userns_file_early(tracee, AT_FDCWD, SYSARG_1);
+
 		if (   ((flags & O_NOFOLLOW) != 0)
 		    || ((flags & O_EXCL) != 0 && (flags & O_CREAT) != 0))
 			status = translate_sysarg(tracee, SYSARG_1, SYMLINK);
@@ -2699,6 +2750,15 @@ int translate_syscall_enter(Tracee *tracee)
 		if (tracee->execfn_addr != 0 && strcmp(path, "/proc/self/auxv") == 0) {
 			tracee->sysexit_pending = true;
 			tracee->restart_how = PTRACE_SYSCALL;
+		}
+
+		if (maybe_redirect_userns_file_early(tracee, dirfd, SYSARG_2)) {
+			/* Now an absolute /dev/null; the descriptor must not be
+			 * consulted any more. */
+			dirfd = AT_FDCWD;
+			status = get_sysarg_path(tracee, path, SYSARG_2);
+			if (status < 0)
+				break;
 		}
 
 		if (   ((flags & O_NOFOLLOW) != 0)
