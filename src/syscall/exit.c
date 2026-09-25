@@ -28,6 +28,7 @@
 #include <linux/prctl.h> /* PR_GET_AUXV, */
 #include <string.h>      /* strlen(3), */
 #include <unistd.h>      /* readlink(2), */
+#include <sys/time.h>   /* struct itimerval, */
 
 #include "cli/note.h"
 #include "syscall/syscall.h"

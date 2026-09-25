@@ -1,4 +1,5 @@
 #include <errno.h>     /* E*, */
+#include <sys/time.h>   /* struct itimerval, ITIMER_REAL, */
 #include <signal.h>    /* SIGSYS, */
 #include <unistd.h>    /* getpgid, */
 #include <utime.h>     /* utimbuf, */
