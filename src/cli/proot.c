@@ -341,6 +341,17 @@ static int handle_option_p(Tracee *tracee, const Cli *cli UNUSED, const char *va
         return 0;
 }
 
+static int handle_option_kill_report(Tracee *tracee, const Cli *cli UNUSED, const char *value)
+{
+	int status;
+
+	status = initialize_extension(tracee, kill_report_callback, value);
+	if (status < 0)
+		note(tracee, WARNING, INTERNAL, "kill-report not initialized");
+
+	return 0;
+}
+
 /**
  * Initialize @tracee->qemu.
  */

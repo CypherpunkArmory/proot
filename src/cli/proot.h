@@ -68,6 +68,7 @@ static int handle_option_L(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_fix_selinux_xattr(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_H(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_p(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_kill_report(Tracee *tracee, const Cli *cli, const char *value);
 
 static int pre_initialize_bindings(Tracee *, const Cli *, size_t, char *const *, size_t);
 static int post_initialize_exe(Tracee *, const Cli *, size_t, char *const *, size_t);
@@ -295,6 +296,19 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
           .detail = "\tChanges the value of setxattr from EACCES or EPERM to ENOTSUP \
  when trying to write security.selinux.",
         },
+	{ .class = "Extension options",
+	  .arguments = {
+		{ .name = "--kill-report", .separator = '=', .value = "path" },
+		{ .name = NULL, .separator = '\0', .value = NULL } },
+	  .handler = handle_option_kill_report,
+	  .description = "Record tracees killed from outside the guest into *path*.",
+	  .detail = "\tSIGKILL cannot be caught, so a process reaped by the host -- Android\'s\n\
+\tphantom process killer, for one -- leaves no trace inside the guest and\n\
+\tnone in the host\'s own logs either.  PRoot sees it because it is the\n\
+\ttracer.  Each such death is appended to *path* as it happens, along with\n\
+\twhether the guest itself had asked for it, and a line is written on a\n\
+\tclean exit so that a report which stops mid-way is itself evidence.",
+	},
 	{ .class = "Alias options",
 	  .arguments = {
 		{ .name = "-R", .separator = ' ', .value = "path" },

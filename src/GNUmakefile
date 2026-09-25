@@ -56,6 +56,7 @@ OBJECTS += \
 	ptrace/user.o		\
 	ptrace/wait.o		\
 	extension/extension.o	\
+	extension/kill_report/kill_report.o \
 	extension/mountinfo/mountinfo.o \
 	extension/kompat/kompat.o \
 	extension/fake_id0/chown.o \
