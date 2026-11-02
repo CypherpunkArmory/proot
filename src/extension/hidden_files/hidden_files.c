@@ -62,6 +62,13 @@ static int hasprefix(char *prefix, char *str) {
  */
 static int handle_getdents(Tracee *tracee)
 {
+    /* Only the result of a getdents that actually ran is a buffer of entries. Another
+     * extension can replace the call with syscalls of its own (droid_files talks to a socket
+     * instead), and their results are not entries at all. */
+    word_t current = get_sysnum(tracee, CURRENT);
+    if (current != PR_getdents64 && current != PR_getdents)
+        return 0;
+
     switch (get_sysnum(tracee, ORIGINAL)) {
     case PR_getdents64: 
     case PR_getdents: {

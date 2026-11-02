@@ -129,6 +129,7 @@ void inherit_extensions(Tracee *child, Tracee *parent, word_t clone_flags)
 {
 	Extension *parent_extension;
 	Extension *child_extension;
+	Extension *previous = NULL;
 	int status;
 
 	if (parent->extensions == NULL)
@@ -154,6 +155,16 @@ void inherit_extensions(Tracee *child, Tracee *parent, word_t clone_flags)
 				"can't create a new extension for pid %d", child->pid);
 			continue;
 		}
+
+		/* Keep the parent's order. new_extension() puts each one at the head, which used to
+		 * reverse the list in every child, so extensions ran in one order in a process and
+		 * the opposite order in its children. An extension that takes a syscall over before
+		 * the others see it (droid_files) relies on running first everywhere.  */
+		if (previous != NULL) {
+			LIST_REMOVE(child_extension, link);
+			LIST_INSERT_AFTER(previous, child_extension, link);
+		}
+		previous = child_extension;
 
 		if (status == 0) {
 			/* ... with a shared config or ...  */
