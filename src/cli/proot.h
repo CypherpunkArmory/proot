@@ -69,6 +69,7 @@ static int handle_option_fix_selinux_xattr(Tracee *tracee, const Cli *cli, const
 static int handle_option_H(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_p(Tracee *tracee, const Cli *cli, const char *value);
 static int handle_option_kill_report(Tracee *tracee, const Cli *cli, const char *value);
+static int handle_option_local_ports(Tracee *tracee, const Cli *cli, const char *value);
 
 static int pre_initialize_bindings(Tracee *, const Cli *, size_t, char *const *, size_t);
 static int post_initialize_exe(Tracee *, const Cli *, size_t, char *const *, size_t);
@@ -296,6 +297,16 @@ Copyright (C) 2015 STMicroelectronics, licensed under GPL v2 or later.",
           .detail = "\tChanges the value of setxattr from EACCES or EPERM to ENOTSUP \
  when trying to write security.selinux.",
         },
+	{ .class = "Extension options",
+	  .arguments = {
+		{ .name = "--local-ports", .separator = '=', .value = "ports" },
+		{ .name = NULL, .separator = '\0', .value = NULL } },
+	  .handler = handle_option_local_ports,
+	  .description = "Keep the comma-separated TCP *ports* reachable from this device only.",
+	  .detail = "\tA bind() of one of *ports* to any address but loopback is made a bind\n\
+\tto loopback instead, so servers listening on all interfaces aren't exposed\n\
+\tto the network.  IPv6 binds use the IPv4-mapped loopback address.",
+	},
 	{ .class = "Extension options",
 	  .arguments = {
 		{ .name = "--kill-report", .separator = '=', .value = "path" },

@@ -352,6 +352,11 @@ static int handle_option_kill_report(Tracee *tracee, const Cli *cli UNUSED, cons
 	return 0;
 }
 
+static int handle_option_local_ports(Tracee *tracee, const Cli *cli UNUSED, const char *value)
+{
+	return initialize_extension(tracee, local_ports_callback, value) < 0 ? -1 : 0;
+}
+
 /**
  * Initialize @tracee->qemu.
  */
