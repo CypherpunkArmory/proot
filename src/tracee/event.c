@@ -35,6 +35,8 @@
 #include <stdlib.h>     /* atexit(3), getenv(3), */
 #include <talloc.h>     /* talloc_*, */
 #include <inttypes.h>   /* PRI*, */
+#include <stdio.h>      /* fopen(3), sscanf(3), */
+#include <sys/syscall.h> /* SYS_tgkill, */
 
 #include "tracee/event.h"
 #include "tracee/seccomp.h"
@@ -418,6 +420,45 @@ int event_loop()
 }
 
 /**
+ * Return the lowest of the signals suppressed during @tracee's last
+ * syscall chain, for the caller to deliver, and send the others to it
+ * again so they are pending at once: under seccomp the next syscall
+ * stop could be a long way off.
+ */
+static int redeliver_suppressed_signals(Tracee *tracee)
+{
+	uint64_t signals = tracee->chain.suppressed_signals;
+	int first = __builtin_ctzll(signals) + 1;
+	pid_t tgid = tracee->pid;
+	char path[64];
+	char line[64];
+	FILE *status;
+	int signal;
+
+	tracee->chain.suppressed_signals = 0;
+	signals &= ~(1ULL << (first - 1));
+	VERBOSE(tracee, 6, "vpid %" PRIu64 ": redelivering suppressed signal %d", tracee->vpid, first);
+	if (signals == 0)
+		return first;
+
+	snprintf(path, sizeof(path), "/proc/%d/status", tracee->pid);
+	status = fopen(path, "r");
+	if (status != NULL) {
+		while (fgets(line, sizeof(line), status) != NULL)
+			if (sscanf(line, "Tgid: %d", &tgid) == 1)
+				break;
+		fclose(status);
+	}
+	for (signal = 1; signals != 0; signal++, signals >>= 1) {
+		if (!(signals & 1))
+			continue;
+		VERBOSE(tracee, 6, "vpid %" PRIu64 ": resending suppressed signal %d", tracee->vpid, signal);
+		syscall(SYS_tgkill, tgid, tracee->pid, signal);
+	}
+	return first;
+}
+
+/**
  * Handle the current event (@tracee_status) of the given @tracee.
  * This function returns the "computed" signal that should be used to
  * restart the given @tracee.
@@ -560,13 +601,10 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 								get_sysnum(tracee, CURRENT) == PR_void);
 					}
 
-					/* Redeliver signal suppressed during
+					/* Redeliver signals suppressed during
 					 * syscall chain once it's finished.  */
-					if (tracee->chain.suppressed_signal && tracee->chain.syscalls == NULL && !tracee->restore_original_regs_after_seccomp_event) {
-						signal = tracee->chain.suppressed_signal;
-						tracee->chain.suppressed_signal = 0;
-						VERBOSE(tracee, 6, "vpid %" PRIu64 ": redelivering suppressed signal %d", tracee->vpid, signal);
-					}
+					if (tracee->chain.suppressed_signals && tracee->chain.syscalls == NULL && !tracee->restore_original_regs_after_seccomp_event)
+						signal = redeliver_suppressed_signals(tracee);
 				}
 				else {
 					VERBOSE(tracee, 6, "skipping SIGTRAP for already handled sysenter");
@@ -761,9 +799,10 @@ int handle_tracee_event(Tracee *tracee, int tracee_status)
 			 * unless we're chaining syscall.  */
 			if (tracee->chain.syscalls != NULL || tracee->restore_original_regs_after_seccomp_event) {
 				VERBOSE(tracee, 5,
-						"vpid %" PRIu64 ": suppressing signal during chain signal=%d, prev suppressed_signal=%d",
-						tracee->vpid, signal, tracee->chain.suppressed_signal);
-				tracee->chain.suppressed_signal = signal;
+						"vpid %" PRIu64 ": suppressing signal during chain signal=%d, already suppressed=%#" PRIx64,
+						tracee->vpid, signal, tracee->chain.suppressed_signals);
+				if (signal >= 1 && signal <= 64)
+					tracee->chain.suppressed_signals |= 1ULL << (signal - 1);
 				signal = 0;
 			}
 			break;

@@ -279,7 +279,11 @@ typedef struct tracee {
 			SYSNUM_WORKAROUND_PROCESS_FAULTY_CALL,
 			SYSNUM_WORKAROUND_PROCESS_REPLACED_CALL
 		} sysnum_workaround_state;
-		int suppressed_signal;
+		/* Signals held while a chain runs, bit n-1 for signal n,
+		 * delivered once it's finished.  A chain can wait a long
+		 * time (droid_files waits on the user), so more than one
+		 * may arrive.  */
+		uint64_t suppressed_signals;
 	} chain;
 
 	/* Load info generated during execve sysenter and used during

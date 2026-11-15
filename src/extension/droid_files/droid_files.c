@@ -72,6 +72,13 @@
 #define AT_STATX_SYNC_TYPE 0x6000
 #endif
 
+/* What a tracer sees a syscall interrupted by a signal return (include/linux/errno.h); they
+ * aren't in the userspace headers. */
+#define ERESTARTSYS           512
+#define ERESTARTNOINTR        513
+#define ERESTARTNOHAND        514
+#define ERESTART_RESTARTBLOCK 516
+
 /* --- Wire format: keep in sync with libdroid_files.c. ------------------------------------ */
 
 enum {
@@ -673,6 +680,18 @@ static void handle_reply(Tracee *tracee, DroidFilesState *state, word_t received
 	df_response_t response;
 	int fd;
 
+	/* A signal interrupted the wait, which can be long while the server waits on the user.
+	 * A file syscall isn't meant to fail with EINTR, and most programs report it as an
+	 * error -- and restarting the syscall would send the request again, doing a rename or
+	 * an O_EXCL create twice. So keep waiting for this reply: the signal is held while the
+	 * chain runs, and delivered once the syscall is done. */
+	if ((int) received == -EINTR || (int) received == -ERESTARTSYS
+	    || (int) received == -ERESTARTNOINTR || (int) received == -ERESTARTNOHAND
+	    || (int) received == -ERESTART_RESTARTBLOCK) {
+		VERBOSE(tracee, 4, "droid_files: wait interrupted (%d), waiting again", (int) received);
+		receive_reply(tracee, state);
+		return;
+	}
 	if ((int) received < 0) {
 		finish(tracee, state, received);
 		return;
